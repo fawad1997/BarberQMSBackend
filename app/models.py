@@ -77,6 +77,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     shops = relationship("Shop", back_populates="owner", cascade="all, delete")
@@ -97,10 +98,20 @@ class Shop(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    address = Column(String, nullable=False)
+    city = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    zip_code = Column(String, nullable=False)
+    phone_number = Column(String, nullable=True)
+    email = Column(String, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    location = Column(String, nullable=False)
-    operating_hours = Column(String)  # JSON or structured format
+    operating_hours = Column(String, nullable=True)  # JSON or structured format
     average_wait_time = Column(Float, default=0.0)
+    has_advertisement = Column(Boolean, default=False)
+    advertisement_image_url = Column(String, nullable=True)
+    advertisement_start_date = Column(DateTime, nullable=True)
+    advertisement_end_date = Column(DateTime, nullable=True)
+    is_advertisement_active = Column(Boolean, default=False)
 
     # Relationships
     owner = relationship("User", back_populates="shops")

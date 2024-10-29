@@ -6,29 +6,43 @@ from sqlalchemy.orm import Session
 from app import models
 from app.database import get_db
 import os
+import logging
+from typing import Optional
+from app.models import User, UserRole
+from app.core.security import oauth2_scheme, decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """Get the current user from the token."""
+logger = logging.getLogger(__name__)
+
+async def get_current_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
+        payload = decode_access_token(token)
+        user_id: Optional[str] = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-    except JWTError:
+    except Exception as e:
+        logger.error(f"Token decode error: {str(e)}")
         raise credentials_exception
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    
+    user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None:
+        logger.error(f"User not found for ID: {user_id}")
         raise credentials_exception
+        
+    logger.debug(f"Retrieved user: ID={user.id}, Role={user.role}")
     return user
 
 def get_current_active_user(current_user: models.User = Depends(get_current_user)):
@@ -37,11 +51,16 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-def get_current_user_by_role(required_role: models.UserRole):
-    """Dependency to get current user and check their role."""
-    def role_checker(current_user: models.User = Depends(get_current_active_user)):
-        if current_user.role != required_role.value:
-            raise HTTPException(status_code=403, detail="Not enough permissions")
+def get_current_user_by_role(required_role: UserRole):
+    async def role_checker(current_user: User = Depends(get_current_user)) -> User:
+        logger.debug(f"Checking role for user {current_user.id}: {current_user.role} against required: {required_role}")
+        
+        if current_user.role != required_role:
+            logger.error(f"Role mismatch for user {current_user.id}: has {current_user.role}, needs {required_role}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User must have role: {required_role.value}"
+            )
         return current_user
     return role_checker
 

@@ -1,18 +1,29 @@
 # app/routers/shop_owners.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
 from app.core.dependencies import get_current_user_by_role
 from app.core.security import get_password_hash
 from app.models import UserRole
+import logging
+import aiofiles
+import os
+import uuid
 
 router = APIRouter(prefix="/shop-owners", tags=["Shop Owners"])
 
+# Initialize logger
+logger = logging.getLogger(__name__)
+
+# Define the dependency with explicit role check
 get_current_shop_owner = get_current_user_by_role(UserRole.SHOP_OWNER)
+
+UPLOAD_DIR = "static/advertisements"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/shops/", response_model=schemas.ShopResponse)
 def create_shop(
@@ -23,8 +34,13 @@ def create_shop(
     # Implement logic to create a shop
     new_shop = models.Shop(
         name=shop_in.name,
-        location=shop_in.location,
-        operating_hours=shop_in.operating_hours,
+        address=shop_in.address,
+        city=shop_in.city,
+        state=shop_in.state,
+        zip_code=shop_in.zip_code,
+        phone_number=shop_in.phone_number,
+        average_wait_time=shop_in.average_wait_time,
+        email=shop_in.email,
         owner_id=current_user.id,
     )
     db.add(new_shop)
@@ -33,50 +49,99 @@ def create_shop(
     return new_shop
 
 
-@router.get("/shops/", response_model=schemas.ShopResponse)
-def get_my_shop(
+@router.get("/shops/", response_model=List[schemas.ShopResponse])
+async def get_my_shops(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    logger.debug(f"User ID: {current_user.id}, Role: {current_user.role}")
+    
+    # Verify user role explicitly
+    if current_user.role != UserRole.SHOP_OWNER:
+        logger.error(f"User {current_user.id} has role {current_user.role}, expected {UserRole.SHOP_OWNER}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User must be a shop owner"
+        )
+    
+    shops = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).all()
+    logger.debug(f"Found {len(shops)} shops for user {current_user.id}")
+    return shops
+
+
+@router.get("/shops/{shop_id}", response_model=schemas.ShopResponse)
+def get_shop_by_id(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     return shop
 
 
-@router.put("/shops/", response_model=schemas.ShopResponse)
-def update_my_shop(
+@router.put("/shops/{shop_id}", response_model=schemas.ShopResponse)
+def update_shop(
+    shop_id: int,
     shop_in: schemas.ShopUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
-    for var, value in vars(shop_in).items():
-        if value is not None:
-            setattr(shop, var, value)
+    
+    # Convert input model to dict, excluding None values
+    update_data = shop_in.model_dump(exclude_unset=True)
+    
+    # Update shop attributes
+    for field, value in update_data.items():
+        setattr(shop, field, value)
+        
+        # If advertisement fields are being updated, ensure consistency
+        if field in ['has_advertisement', 'advertisement_image_url', 'advertisement_start_date', 'advertisement_end_date']:
+            if not shop.has_advertisement:
+                shop.advertisement_image_url = None
+                shop.advertisement_start_date = None
+                shop.advertisement_end_date = None
+                shop.is_advertisement_active = False
+            elif shop.has_advertisement and not shop.advertisement_image_url:
+                shop.has_advertisement = False
+                shop.is_advertisement_active = False
+    
     db.add(shop)
     db.commit()
     db.refresh(shop)
     return shop
 
 
-@router.post("/shops/barbers/", response_model=schemas.BarberResponse)
+@router.post("/shops/{shop_id}/barbers/", response_model=schemas.BarberResponse)
 def add_barber(
+    shop_id: int,
     barber_in: schemas.BarberCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
     # Find or create the user to assign as a barber
     user = db.query(models.User).filter(models.User.email == barber_in.email).first()
     if not user:
-        # Create a new user account
-        hashed_password = get_password_hash(barber_in.password)
+        # Create a new user account with default or provided password
+        password = barber_in.password if barber_in.password else "Temp1234"
+        hashed_password = get_password_hash(password)
         user = models.User(
             full_name=barber_in.full_name,
             email=barber_in.email,
@@ -94,32 +159,218 @@ def add_barber(
             raise HTTPException(status_code=400, detail="User is already assigned a role")
         # Update user's role to barber
         user.role = models.UserRole.BARBER
+        if barber_in.password:  # Update password if provided
+            user.hashed_password = get_password_hash(barber_in.password)
         db.add(user)
         db.commit()
 
-    # Create barber profile
+    # Create barber profile with status
     new_barber = models.Barber(
         user_id=user.id,
         shop_id=shop.id,
-        status=models.BarberStatus.AVAILABLE
+        status=barber_in.status or models.BarberStatus.AVAILABLE
     )
     db.add(new_barber)
     db.commit()
     db.refresh(new_barber)
-    return new_barber
+
+    # Create response dictionary with all required fields
+    response_data = {
+        "id": new_barber.id,
+        "user_id": user.id,
+        "shop_id": shop.id,
+        "status": new_barber.status,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "is_active": user.is_active
+    }
+    
+    return response_data
 
 
-@router.get("/shops/barbers/", response_model=List[schemas.BarberResponse])
-def get_barbers(
+@router.put("/shops/{shop_id}/barbers/{barber_id}", response_model=schemas.BarberResponse)
+def update_barber(
+    shop_id: int,
+    barber_id: int,
+    barber_in: schemas.BarberUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    """Update barber details"""
+    # First, verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    barbers = db.query(models.Barber).filter(models.Barber.shop_id == shop.id).all()
-    return barbers
+    # Add logging to debug the query
+    logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id}")
+    
+    # Get barber with a join to ensure we have all related data
+    barber = (
+        db.query(models.Barber)
+        .join(models.User)
+        .filter(
+            models.Barber.id == barber_id,
+            models.Barber.shop_id == shop_id  # Changed from shop.id to shop_id
+        )
+        .first()
+    )
+    
+    # Add debug logging
+    logger.debug(f"Barber query result: {barber}")
+    
+    if not barber:
+        # Add more detailed error information
+        existing_barber = db.query(models.Barber).filter(models.Barber.id == barber_id).first()
+        if existing_barber:
+            logger.error(f"Barber exists but in different shop. Barber shop_id: {existing_barber.shop_id}, Requested shop_id: {shop_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Barber with ID {barber_id} not found in shop {shop_id}"
+            )
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    # Get associated user (should always exist due to the join above)
+    user = barber.user
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Update user details if provided
+    if barber_in.full_name is not None:
+        user.full_name = barber_in.full_name
+    if barber_in.email is not None:
+        user.email = barber_in.email
+    if barber_in.phone_number is not None:
+        user.phone_number = barber_in.phone_number
+    if barber_in.password is not None:
+        user.hashed_password = get_password_hash(barber_in.password)
+    if barber_in.is_active is not None:
+        user.is_active = barber_in.is_active
+
+    # Update barber status if provided
+    if barber_in.status is not None:
+        barber.status = barber_in.status
+
+    try:
+        db.add(user)
+        db.add(barber)
+        db.commit()
+        db.refresh(barber)
+        db.refresh(user)
+
+        # Create response with all required fields
+        response_data = {
+            "id": barber.id,
+            "user_id": user.id,
+            "shop_id": shop_id,
+            "status": barber.status,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "is_active": user.is_active
+        }
+        
+        return response_data
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating barber: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while updating the barber"
+        )
+
+
+@router.patch("/shops/{shop_id}/barbers/{barber_id}/status", response_model=schemas.BarberResponse)
+def update_barber_status(
+    shop_id: int,
+    barber_id: int,
+    status: models.BarberStatus,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Update barber status only"""
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Join with User table to get all required information
+    barber = (
+        db.query(models.Barber)
+        .join(models.User)
+        .filter(
+            models.Barber.id == barber_id,
+            models.Barber.shop_id == shop.id
+        )
+        .first()
+    )
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    barber.status = status
+    db.add(barber)
+    db.commit()
+    db.refresh(barber)
+
+    # Create response with all required fields
+    response_data = {
+        "id": barber.id,
+        "user_id": barber.user_id,
+        "shop_id": barber.shop_id,
+        "status": barber.status,
+        "full_name": barber.user.full_name,
+        "email": barber.user.email,
+        "phone_number": barber.user.phone_number,
+        "is_active": barber.user.is_active
+    }
+    
+    return response_data
+
+
+@router.get("/shops/{shop_id}/barbers/", response_model=List[schemas.BarberResponse])
+def get_barbers(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Join with User table to get all required information
+    barbers = (
+        db.query(models.Barber)
+        .join(models.User)
+        .filter(models.Barber.shop_id == shop.id)
+        .all()
+    )
+
+    # Create response objects with combined barber and user information
+    barber_responses = []
+    for barber in barbers:
+        response_dict = {
+            "id": barber.id,
+            "user_id": barber.user_id,
+            "shop_id": barber.shop_id,
+            "status": barber.status,
+            "full_name": barber.user.full_name,
+            "email": barber.user.email,
+            "phone_number": barber.user.phone_number,
+            "is_active": barber.user.is_active
+        }
+        barber_responses.append(response_dict)
+
+    return barber_responses
 
 
 @router.delete("/shops/barbers/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -151,13 +402,18 @@ def remove_barber(
 
 
 
-@router.post("/shops/services/", response_model=schemas.ServiceResponse)
+@router.post("/shops/{shop_id}/services/", response_model=schemas.ServiceResponse)
 def create_service(
+    shop_id: int,
     service_in: schemas.ServiceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    """Create a new service for a shop"""
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -174,12 +430,16 @@ def create_service(
 
 
 
-@router.get("/shops/services/", response_model=List[schemas.ServiceResponse])
+@router.get("/shops/{shop_id}/services/", response_model=List[schemas.ServiceResponse])
 def get_services(
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -188,14 +448,18 @@ def get_services(
 
 
 
-@router.put("/shops/services/{service_id}", response_model=schemas.ServiceResponse)
+@router.put("/shops/{shop_id}/services/{service_id}", response_model=schemas.ServiceResponse)
 def update_service(
+    shop_id: int,
     service_id: int,
     service_in: schemas.ServiceUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -237,12 +501,16 @@ def delete_service(
     return
 
 
-@router.get("/shops/queue/", response_model=List[schemas.QueueEntryResponse])
+@router.get("/shops/{shop_id}/queue/", response_model=List[schemas.QueueEntryResponse])
 def get_queue(
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -253,14 +521,18 @@ def get_queue(
     return queue_entries
 
 
-@router.put("/shops/queue/{queue_id}", response_model=schemas.QueueEntryResponse)
+@router.put("/shops/{shop_id}/queue/{queue_id}", response_model=schemas.QueueEntryResponse)
 def update_queue_entry(
+    shop_id: int,
     queue_id: int,
     status_update: schemas.QueueStatusUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -282,12 +554,16 @@ def update_queue_entry(
     return queue_entry
 
 
-@router.get("/shops/appointments/", response_model=List[schemas.AppointmentResponse])
+@router.get("/shops/{shop_id}/appointments/", response_model=List[schemas.AppointmentResponse])
 def get_shop_appointments(
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -297,12 +573,16 @@ def get_shop_appointments(
     return appointments
 
 
-@router.get("/shops/feedback/", response_model=List[schemas.FeedbackResponse])
+@router.get("/shops/{shop_id}/feedback/", response_model=List[schemas.FeedbackResponse])
 def get_shop_feedback(
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -312,13 +592,17 @@ def get_shop_feedback(
     return feedbacks
 
 
-@router.get("/shops/reports/daily", response_model=schemas.DailyReportResponse)
+@router.get("/shops/{shop_id}/reports/daily", response_model=schemas.DailyReportResponse)
 def get_daily_report(
+    shop_id: int,
     date: datetime = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -340,3 +624,86 @@ def get_daily_report(
         average_wait_time=average_wait_time
     )
     return report
+
+@router.post("/shops/{shop_id}/advertisement", response_model=schemas.ShopResponse)
+async def upload_advertisement(
+    shop_id: int,
+    file: UploadFile = File(...),
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Upload an advertisement image for a shop"""
+    
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Validate file type
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only image files are allowed"
+        )
+
+    # Generate unique filename
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    
+    # Save the file
+    async with aiofiles.open(file_path, 'wb') as out_file:
+        content = await file.read()
+        await out_file.write(content)
+
+    # Update shop with advertisement details
+    shop.has_advertisement = True
+    shop.advertisement_image_url = f"/static/advertisements/{unique_filename}"
+    shop.advertisement_start_date = start_date
+    shop.advertisement_end_date = end_date
+    shop.is_advertisement_active = True
+
+    db.add(shop)
+    db.commit()
+    db.refresh(shop)
+    
+    return shop
+
+@router.delete("/shops/{shop_id}/advertisement", response_model=schemas.ShopResponse)
+async def remove_advertisement(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Remove advertisement from a shop"""
+    
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Delete the image file if it exists
+    if shop.advertisement_image_url:
+        file_path = os.path.join("static", shop.advertisement_image_url.lstrip('/'))
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    # Reset advertisement fields
+    shop.has_advertisement = False
+    shop.advertisement_image_url = None
+    shop.advertisement_start_date = None
+    shop.advertisement_end_date = None
+    shop.is_advertisement_active = False
+
+    db.add(shop)
+    db.commit()
+    db.refresh(shop)
+    
+    return shop

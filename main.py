@@ -1,5 +1,6 @@
 # main.py
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.routers import (
     auth,
     users,
@@ -14,6 +15,7 @@ from app.routers import (
 
 app = FastAPI(title="Barbershop Queue System API")
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(shop_owners.router)

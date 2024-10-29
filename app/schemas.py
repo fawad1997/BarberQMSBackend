@@ -1,8 +1,8 @@
 # app/schemas.py
 
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
-from typing import Optional
-from app.models import AppointmentStatus
+from typing import Optional, List
+from app.models import AppointmentStatus, BarberStatus
 from enum import Enum
 from datetime import datetime, timezone
 import pytz
@@ -61,9 +61,13 @@ class UserResponse(UserBase):
     id: int
     is_active: bool
     role: UserRole
+    created_at: datetime
 
-    class Config:
-        orm_mode = True
+    @field_validator('created_at')
+    def validate_created_at(cls, v):
+        return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     access_token: str
@@ -111,9 +115,16 @@ class ShopBase(BaseModel):
     zip_code: str
     phone_number: Optional[str] = None
     email: Optional[str] = None
+    average_wait_time: Optional[float] = None
+    has_advertisement: Optional[bool] = False
+    advertisement_image_url: Optional[str] = None
+    advertisement_start_date: Optional[datetime] = None
+    advertisement_end_date: Optional[datetime] = None
+    is_advertisement_active: Optional[bool] = False
 
 class ShopCreate(ShopBase):
     pass
+
 
 class ShopUpdate(BaseModel):
     name: Optional[str] = None
@@ -123,6 +134,20 @@ class ShopUpdate(BaseModel):
     zip_code: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
+    average_wait_time: Optional[float] = None
+    # Add advertisement fields
+    has_advertisement: Optional[bool] = None
+    advertisement_image_url: Optional[str] = None
+    advertisement_start_date: Optional[datetime] = None
+    advertisement_end_date: Optional[datetime] = None
+    is_advertisement_active: Optional[bool] = None
+
+    # Add validator for dates
+    @field_validator('advertisement_start_date', 'advertisement_end_date')
+    def validate_dates(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
 
 class ShopResponse(ShopBase):
     id: int
@@ -136,21 +161,30 @@ class BarberBase(BaseModel):
     email: EmailStr
     phone_number: str
 
-class BarberCreate(BarberBase):
-    password: str
+class BarberCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    phone_number: str
+    password: Optional[str] = "Temp1234"
+    status: Optional[BarberStatus] = BarberStatus.AVAILABLE
 
 class BarberUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[BarberStatus] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
 
 class BarberResponse(BaseModel):
     id: int
     user_id: int
     shop_id: int
-    status: str
-    user: UserResponse
+    status: BarberStatus
+    full_name: str
+    email: str
+    phone_number: str
+    is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,15 +192,12 @@ class ServiceBase(BaseModel):
     name: str
     duration: int  # Duration in minutes
     price: float
-    shop_id: Optional[int] = None
 
 class ServiceCreate(ServiceBase):
     pass
 
-class ServiceUpdate(BaseModel):
-    name: Optional[str] = None
-    duration: Optional[int] = None
-    price: Optional[float] = None
+class ServiceUpdate(ServiceBase):
+    pass
 
 class ServiceResponse(ServiceBase):
     id: int
@@ -252,3 +283,23 @@ class BarberScheduleResponse(BarberScheduleBase):
 class LoginRequest(BaseModel):
     username: str  # Can be either email or phone number
     password: str
+
+# Add a new response schema for listing shops
+class ShopListResponse(BaseModel):
+    shops: List[ShopResponse]
+    total: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+class AdvertisementUpdate(BaseModel):
+    has_advertisement: bool
+    advertisement_image_url: Optional[str] = None
+    advertisement_start_date: Optional[datetime] = None
+    advertisement_end_date: Optional[datetime] = None
+    is_advertisement_active: Optional[bool] = None
+
+    @field_validator('advertisement_start_date', 'advertisement_end_date')
+    def validate_dates(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
