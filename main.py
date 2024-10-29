@@ -1,4 +1,5 @@
 # main.py
+import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.routers import (
@@ -30,3 +31,5 @@ app.include_router(unregistered_users.router)
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
 
+if __name__ == "__main__":
+    uvicorn.run("main:app", port=8000, reload=True)
