@@ -22,10 +22,10 @@ import enum
 
 # Enums for user roles
 class UserRole(enum.Enum):
-    USER = "user"
-    SHOP_OWNER = "shop_owner"
-    BARBER = "barber"
-    ADMIN = "admin"
+    USER = "USER"
+    SHOP_OWNER = "SHOP_OWNER"
+    BARBER = "BARBER"
+    ADMIN = "ADMIN"
 
 
 # Enums for appointment and queue statuses

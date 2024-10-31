@@ -7,6 +7,7 @@ from app.database import get_db
 from app.core.security import get_password_hash
 from app.core.dependencies import get_current_active_user
 from typing import List
+from app.models import UserRole
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -26,7 +27,7 @@ def create_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
         email=user_in.email,
         phone_number=user_in.phone_number,
         hashed_password=hashed_password,
-        role=user_in.role,
+        role=UserRole.USER,
     )
     db.add(new_user)
     db.commit()

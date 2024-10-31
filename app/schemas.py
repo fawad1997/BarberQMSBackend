@@ -29,10 +29,10 @@ def convert_to_utc(dt: datetime) -> datetime:
     return pacific_dt.astimezone(timezone.utc)
 
 class UserRole(str, Enum):
-    user = "user"
-    shop_owner = "shop_owner"
-    barber = "barber"
-    admin = "admin"
+    user = "USER"
+    shop_owner = "SHOP_OWNER"
+    barber = "BARBER"
+    admin = "ADMIN"
 
 class UserBase(BaseModel):
     full_name: str

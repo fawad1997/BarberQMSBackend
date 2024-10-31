@@ -1,38 +1,44 @@
-# alembic/env.py
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
 from alembic import context
-from dotenv import load_dotenv
 import os
-import sys
-import logging
-
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+# Import your models here
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+# Import all models to ensure they are registered with SQLAlchemy
+from app.database import Base
+from app.models import (
+    User,
+    Shop,
+    Barber,
+    Service,
+    Appointment,
+    Feedback,
+    QueueEntry,
+    BarberSchedule,
+    barber_services
+)
+
 # this is the Alembic Config object
 config = context.config
 
-# Override the SQLAlchemy URL with the one from environment
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
+# Override sqlalchemy.url with environment variable
+section = config.config_ini_section
+config.set_section_option(section, "sqlalchemy.url", os.getenv("DATABASE_URL"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all models
-from app.database import Base
-from app.models import *  # This ensures all models are imported
-
-# Set metadata target
 target_metadata = Base.metadata
-
-# Add after the other imports
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("alembic")
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
@@ -47,10 +53,8 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = os.getenv("DATABASE_URL")
     connectable = engine_from_config(
-        configuration,
+        config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
