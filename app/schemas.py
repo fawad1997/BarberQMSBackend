@@ -303,3 +303,18 @@ class AdvertisementUpdate(BaseModel):
         if v is not None:
             return validate_timezone(v)
         return v
+
+class TokenWithUserDetails(Token):
+    user_id: int
+    full_name: str
+    email: EmailStr
+    phone_number: str
+    role: UserRole
+    is_active: bool
+    created_at: datetime
+
+    @field_validator('created_at')
+    def validate_created_at(cls, v):
+        return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)

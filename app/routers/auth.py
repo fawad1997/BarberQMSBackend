@@ -51,7 +51,7 @@ async def register_shop_owner(
     
     return db_user
 
-@router.post("/login", response_model=schemas.Token)
+@router.post("/login", response_model=schemas.TokenWithUserDetails)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
@@ -86,4 +86,15 @@ async def login_for_access_token(
     access_token = create_access_token(
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "role": user.role,
+        "is_active": user.is_active,
+        "created_at": user.created_at
+    }
