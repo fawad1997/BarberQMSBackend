@@ -52,10 +52,56 @@ async def register_shop_owner(
     return db_user
 
 @router.post("/login", response_model=schemas.TokenWithUserDetails)
+async def login_json(
+    login_data: schemas.LoginRequest,
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(
+        (models.User.email == login_data.username) |
+        (models.User.phone_number == login_data.username)
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is inactive"
+        )
+
+    if not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password"
+        )
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": str(user.id)}, expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "role": user.role,
+        "is_active": user.is_active,
+        "created_at": user.created_at
+    }
+
+@router.post("/login/form", response_model=schemas.TokenWithUserDetails)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
+    print(form_data)
     user = db.query(models.User).filter(
         (models.User.email == form_data.username) |
         (models.User.phone_number == form_data.username)

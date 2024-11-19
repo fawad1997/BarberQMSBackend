@@ -11,7 +11,7 @@ from typing import Optional
 from app.models import User, UserRole
 from app.core.security import oauth2_scheme, decode_access_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login/form")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
