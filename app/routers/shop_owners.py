@@ -121,6 +121,42 @@ def update_shop(
     db.refresh(shop)
     return shop
 
+@router.delete("/shops/{shop_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_shop(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Delete a shop and all its related data"""
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    try:
+        # Delete advertisement image if exists
+        if shop.advertisement_image_url:
+            file_path = os.path.join("static", shop.advertisement_image_url.lstrip('/'))
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        
+        # Delete the shop (cascading will handle related records)
+        db.delete(shop)
+        db.commit()
+        return
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting shop: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while deleting the shop"
+        )
+
 
 @router.post("/shops/{shop_id}/barbers/", response_model=schemas.BarberResponse)
 def add_barber(
@@ -707,3 +743,4 @@ async def remove_advertisement(
     db.refresh(shop)
     
     return shop
+
