@@ -745,3 +745,134 @@ async def remove_advertisement(
     
     return shop
 
+@router.post("/shops/{shop_id}/barbers/{barber_id}/services", response_model=schemas.BarberResponse)
+def assign_services_to_barber(
+    shop_id: int,
+    barber_id: int,
+    service_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Assign services to a barber"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    # Verify all services exist and belong to the shop
+    new_services = db.query(models.Service).filter(
+        models.Service.id.in_(service_ids),
+        models.Service.shop_id == shop.id
+    ).all()
+
+    if len(new_services) != len(service_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="One or more services not found or don't belong to this shop"
+        )
+
+    # Check for duplicates to avoid adding the same service twice
+    existing_service_ids = {service.id for service in barber.services}
+    
+    # Add only new services that aren't already assigned
+    for service in new_services:
+        if service.id not in existing_service_ids:
+            barber.services.append(service)
+
+    db.add(barber)
+    db.commit()
+    db.refresh(barber)
+
+    # Create response with all required fields
+    response_data = {
+        "id": barber.id,
+        "user_id": barber.user.id,
+        "shop_id": barber.shop_id,
+        "status": barber.status,
+        "full_name": barber.user.full_name,
+        "email": barber.user.email,
+        "phone_number": barber.user.phone_number,
+        "is_active": barber.user.is_active,
+        "services": [{
+            "id": s.id,
+            "name": s.name,
+            "duration": s.duration,
+            "price": s.price,
+            "shop_id": s.shop_id
+        } for s in barber.services]
+    }
+    
+    return response_data
+
+@router.delete("/shops/{shop_id}/barbers/{barber_id}/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_service_from_barber(
+    shop_id: int,
+    barber_id: int,
+    service_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Remove a service from a barber's list of services"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    # Verify service exists and belongs to the shop
+    service = db.query(models.Service).filter(
+        models.Service.id == service_id,
+        models.Service.shop_id == shop.id
+    ).first()
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    # Remove service from barber's services
+    barber.services.remove(service)
+    db.add(barber)
+    db.commit()
+
+@router.get("/shops/{shop_id}/barbers/{barber_id}/services", response_model=List[schemas.ServiceResponse])
+def get_barber_services(
+    shop_id: int,
+    barber_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Get all services assigned to a barber"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    return barber.services
+

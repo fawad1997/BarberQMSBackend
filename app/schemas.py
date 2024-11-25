@@ -155,7 +155,38 @@ class ShopResponse(ShopBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-# Add these new schemas after the existing ones
+# First define ServiceBase and ServiceResponse
+class ServiceBase(BaseModel):
+    name: str
+    duration: int
+    price: float
+
+class ServiceCreate(ServiceBase):
+    pass
+
+class ServiceUpdate(ServiceBase):
+    pass
+
+class ServiceResponse(ServiceBase):
+    id: int
+    shop_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Then define BarberResponse which uses ServiceResponse
+class BarberResponse(BaseModel):
+    id: int
+    user_id: int
+    shop_id: int
+    status: BarberStatus
+    full_name: str
+    email: str
+    phone_number: str
+    is_active: bool
+    services: List[ServiceResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
 class BarberBase(BaseModel):
     full_name: str
     email: EmailStr
@@ -175,88 +206,6 @@ class BarberUpdate(BaseModel):
     status: Optional[BarberStatus] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
-
-class BarberResponse(BaseModel):
-    id: int
-    user_id: int
-    shop_id: int
-    status: BarberStatus
-    full_name: str
-    email: str
-    phone_number: str
-    is_active: bool
-
-    model_config = ConfigDict(from_attributes=True)
-
-class ServiceBase(BaseModel):
-    name: str
-    duration: int  # Duration in minutes
-    price: float
-
-class ServiceCreate(ServiceBase):
-    pass
-
-class ServiceUpdate(ServiceBase):
-    pass
-
-class ServiceResponse(ServiceBase):
-    id: int
-    shop_id: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-class QueueStatusUpdate(BaseModel):
-    status: str
-
-class QueueEntryBase(BaseModel):
-    shop_id: int
-    user_id: Optional[int] = None
-    service_id: int
-    full_name: Optional[str] = None
-    phone_number: Optional[str] = None
-
-class QueueEntryCreate(QueueEntryBase):
-    pass
-
-class QueueEntryResponse(QueueEntryBase):
-    id: int
-    status: str
-    check_in_time: datetime
-    service_start_time: Optional[datetime] = None
-    service_end_time: Optional[datetime] = None
-
-    # Add validators for all datetime fields
-    @field_validator('check_in_time', 'service_start_time', 'service_end_time')
-    def validate_times(cls, v):
-        if v is not None:
-            return validate_timezone(v)
-        return v
-
-    model_config = ConfigDict(from_attributes=True)
-
-class DailyReportResponse(BaseModel):
-    date: datetime
-    total_customers: int
-    average_wait_time: float
-
-class FeedbackBase(BaseModel):
-    rating: int
-    comment: Optional[str] = None
-    shop_id: int
-
-class FeedbackCreate(FeedbackBase):
-    pass
-
-class FeedbackResponse(FeedbackBase):
-    id: int
-    user_id: int
-    created_at: datetime
-
-    @field_validator('created_at')
-    def validate_created_at(cls, v):
-        return validate_timezone(v)
-
-    model_config = ConfigDict(from_attributes=True)
 
 class BarberScheduleBase(BaseModel):
     barber_id: int
@@ -311,6 +260,59 @@ class TokenWithUserDetails(Token):
     phone_number: str
     role: UserRole
     is_active: bool
+    created_at: datetime
+
+    @field_validator('created_at')
+    def validate_created_at(cls, v):
+        return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+class QueueStatusUpdate(BaseModel):
+    status: str
+
+class QueueEntryBase(BaseModel):
+    shop_id: int
+    user_id: Optional[int] = None
+    service_id: int
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+
+class QueueEntryCreate(QueueEntryBase):
+    pass
+
+class QueueEntryResponse(QueueEntryBase):
+    id: int
+    status: str
+    check_in_time: datetime
+    service_start_time: Optional[datetime] = None
+    service_end_time: Optional[datetime] = None
+
+    # Add validators for all datetime fields
+    @field_validator('check_in_time', 'service_start_time', 'service_end_time')
+    def validate_times(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+class DailyReportResponse(BaseModel):
+    date: datetime
+    total_customers: int
+    average_wait_time: float
+
+class FeedbackBase(BaseModel):
+    rating: int
+    comment: Optional[str] = None
+    shop_id: int
+
+class FeedbackCreate(FeedbackBase):
+    pass
+
+class FeedbackResponse(FeedbackBase):
+    id: int
+    user_id: int
     created_at: datetime
 
     @field_validator('created_at')
