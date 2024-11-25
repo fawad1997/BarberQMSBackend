@@ -282,7 +282,8 @@ def update_barber(
         user.email = barber_in.email
     if barber_in.phone_number is not None:
         user.phone_number = barber_in.phone_number
-    if barber_in.password is not None:
+    # Only update password if it's provided and not None or empty string
+    if barber_in.password and barber_in.password.strip():
         user.hashed_password = get_password_hash(barber_in.password)
     if barber_in.is_active is not None:
         user.is_active = barber_in.is_active
