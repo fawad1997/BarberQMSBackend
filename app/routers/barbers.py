@@ -67,19 +67,80 @@ def create_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
+    # Check if schedule already exists for this day
+    existing_schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.barber_id == barber.id,
+        models.BarberSchedule.day_of_week == schedule_in.day_of_week
+    ).first()
+    
+    if existing_schedule:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schedule already exists for day {schedule_in.day_of_week}"
+        )
+
     new_schedule = models.BarberSchedule(
         barber_id=barber.id,
-        date=schedule_in.date,
+        day_of_week=schedule_in.day_of_week,
         start_time=schedule_in.start_time,
-        end_time=schedule_in.end_time,
-        schedule_type=schedule_in.schedule_type,
-        is_available=schedule_in.is_available
+        end_time=schedule_in.end_time
     )
 
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
     return new_schedule
+
+@router.put("/schedules/{schedule_id}", response_model=schemas.BarberScheduleResponse)
+def update_schedule(
+    schedule_id: int,
+    schedule_update: schemas.BarberScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_barber)
+):
+    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.id == schedule_id,
+        models.BarberSchedule.barber_id == barber.id
+    ).first()
+    
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    if schedule_update.start_time is not None:
+        schedule.start_time = schedule_update.start_time
+    if schedule_update.end_time is not None:
+        schedule.end_time = schedule_update.end_time
+
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    return schedule
+
+@router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_barber)
+):
+    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.id == schedule_id,
+        models.BarberSchedule.barber_id == barber.id
+    ).first()
+    
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    db.delete(schedule)
+    db.commit()
+    return
 
 @router.get("/schedules/", response_model=List[schemas.BarberScheduleResponse])
 def get_my_schedules(

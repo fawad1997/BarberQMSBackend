@@ -26,6 +26,23 @@ app = FastAPI(
 
 load_dotenv()
 
+# Create a list of allowed origins
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "*"  # Remove this in production
+]
+
+# Update the CORS middleware configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -36,13 +53,7 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure this appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 @app.get("/")
 def read_root():

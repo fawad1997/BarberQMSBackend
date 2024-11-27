@@ -13,6 +13,7 @@ from sqlalchemy import (
     Time,
     Enum,
     Table,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -257,11 +258,17 @@ class BarberSchedule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False)
-    date = Column(Date, nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
-    schedule_type = Column(Enum(ScheduleType), default=ScheduleType.WORKING)
-    is_available = Column(Boolean, default=True)
+
+    # Ensure a barber can have only one schedule per day_of_week
+    __table_args__ = (
+        UniqueConstraint('barber_id', 'day_of_week', name='uix_barber_day'),
+    )
 
     # Relationships
     barber = relationship("Barber", back_populates="schedules")
+    @property
+    def shop_id(self):
+        return self.barber.shop_id

@@ -1,10 +1,10 @@
 # app/schemas.py
 
-from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
 from app.models import AppointmentStatus, BarberStatus
 from enum import Enum
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 import pytz
 
 # At the top of the file, add these imports
@@ -207,26 +207,54 @@ class BarberUpdate(BaseModel):
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
+
 class BarberScheduleBase(BaseModel):
     barber_id: int
-    day_of_week: int  # 0-6 for Monday-Sunday
-    start_time: str   # Format: "HH:MM"
-    end_time: str     # Format: "HH:MM"
-    is_available: bool = True
+    day_of_week: int = Field(
+        ..., 
+        ge=0, 
+        le=6, 
+        description="0=Sunday, 1=Monday, ..., 6=Saturday"
+    )
+    start_time: time   # Changed from str to time
+    end_time: time     # Changed from str to time
 
 class BarberScheduleCreate(BarberScheduleBase):
+    # Removed field validators as Pydantic handles time parsing
     pass
 
 class BarberScheduleUpdate(BaseModel):
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    is_available: Optional[bool] = None
+    day_of_week: Optional[int] = Field(
+        None, 
+        ge=0, 
+        le=6, 
+        description="0=Sunday, 1=Monday, ..., 6=Saturday"
+    )
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
 
-class BarberScheduleResponse(BarberScheduleBase):
+class BarberScheduleResponse(BaseModel):
     id: int
+    barber_id: int
     shop_id: int
+    day_of_week: int
+    start_time: time   # Format handled by Pydantic
+    end_time: time     # Format handled by Pydantic
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True  # Enables ORM mode for Pydantic
+
+    @classmethod
+    def from_orm_with_shop(cls, obj):
+        return cls(
+            id=obj.id,
+            barber_id=obj.barber_id,
+            shop_id=obj.barber.shop_id,  # Access shop_id through the barber relationship
+            day_of_week=obj.day_of_week,
+            start_time=obj.start_time,
+            end_time=obj.end_time
+        )
+
 
 # Update login schema
 class LoginRequest(BaseModel):

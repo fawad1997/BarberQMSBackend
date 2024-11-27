@@ -1,7 +1,7 @@
 # app/routers/shop_owners.py
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app import models, schemas
@@ -875,4 +875,197 @@ def get_barber_services(
         raise HTTPException(status_code=404, detail="Barber not found")
 
     return barber.services
+
+@router.post(
+    "/shops/{shop_id}/barbers/{barber_id}/schedules/", 
+    response_model=schemas.BarberScheduleResponse
+)
+def create_barber_schedule(
+    shop_id: int,
+    barber_id: int,
+    schedule_in: schemas.BarberScheduleCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Create a schedule for a barber in the shop"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    # Check if schedule already exists for this day
+    existing_schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.barber_id == barber.id,
+        models.BarberSchedule.day_of_week == schedule_in.day_of_week
+    ).first()
+    
+    if existing_schedule:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schedule already exists for day {schedule_in.day_of_week}"
+        )
+
+    # No need to convert start_time and end_time; they are already time objects
+    new_schedule = models.BarberSchedule(
+        barber_id=barber.id,
+        day_of_week=schedule_in.day_of_week,
+        start_time=schedule_in.start_time,
+        end_time=schedule_in.end_time
+    )
+
+    db.add(new_schedule)
+    db.commit()
+    db.refresh(new_schedule)
+
+    # Ensure the 'barber' relationship is loaded
+    _ = new_schedule.barber  # Accessing to load the relationship
+
+    # Return the response using Pydantic's model_validate
+    return schemas.BarberScheduleResponse.model_validate(new_schedule)
+
+
+
+@router.get("/shops/{shop_id}/barbers/{barber_id}/schedules/", response_model=List[schemas.BarberScheduleResponse])
+def get_barber_schedules(
+    shop_id: int,
+    barber_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Get all schedules for a barber"""
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Verify barber exists in the shop
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    # Eagerly load the barber relationship to access shop_id
+    schedules = db.query(models.BarberSchedule).options(
+        joinedload(models.BarberSchedule.barber)
+    ).filter(
+        models.BarberSchedule.barber_id == barber.id
+    ).all()
+
+    # Convert schedules to response format using Pydantic's model_validate (Pydantic v2)
+    return [schemas.BarberScheduleResponse.model_validate(schedule) for schedule in schedules]
+
+
+@router.put(
+    "/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}", 
+    response_model=schemas.BarberScheduleResponse
+)
+def update_barber_schedule(
+    shop_id: int,
+    barber_id: int,
+    schedule_id: int,
+    schedule_update: schemas.BarberScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Update a barber's schedule"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.id == schedule_id,
+        models.BarberSchedule.barber_id == barber.id
+    ).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Update schedule fields if provided
+    if schedule_update.start_time is not None:
+        schedule.start_time = schedule_update.start_time
+    if schedule_update.end_time is not None:
+        schedule.end_time = schedule_update.end_time
+    if schedule_update.day_of_week is not None:
+        # Check if schedule already exists for the new day
+        existing_schedule = db.query(models.BarberSchedule).filter(
+            models.BarberSchedule.barber_id == barber.id,
+            models.BarberSchedule.day_of_week == schedule_update.day_of_week,
+            models.BarberSchedule.id != schedule_id
+        ).first()
+        if existing_schedule:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schedule already exists for day {schedule_update.day_of_week}"
+            )
+        schedule.day_of_week = schedule_update.day_of_week
+
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+
+    # Ensure the 'barber' relationship is loaded
+    _ = schedule.barber  # Accessing to load the relationship
+
+    # Return the response using Pydantic's model_validate
+    return schemas.BarberScheduleResponse.model_validate(schedule)
+
+@router.delete("/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_barber_schedule(
+    shop_id: int,
+    barber_id: int,
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Delete a barber's schedule"""
+    # Verify shop ownership and get barber
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    barber = db.query(models.Barber).filter(
+        models.Barber.id == barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+
+    schedule = db.query(models.BarberSchedule).filter(
+        models.BarberSchedule.id == schedule_id,
+        models.BarberSchedule.barber_id == barber.id
+    ).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    db.delete(schedule)
+    db.commit()
+    return
 
