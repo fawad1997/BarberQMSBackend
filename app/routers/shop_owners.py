@@ -1,6 +1,6 @@
 # app/routers/shop_owners.py
 
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -9,6 +9,7 @@ from app.database import get_db
 from app.core.dependencies import get_current_user_by_role
 from app.core.security import get_password_hash
 from app.models import UserRole
+from app.utils.shop_utils import is_shop_open, calculate_wait_time, format_time
 import logging
 import aiofiles
 import os
@@ -31,7 +32,7 @@ def create_shop(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    # Implement logic to create a shop
+    """Create a new shop with operating hours"""
     new_shop = models.Shop(
         name=shop_in.name,
         address=shop_in.address,
@@ -39,24 +40,25 @@ def create_shop(
         state=shop_in.state,
         zip_code=shop_in.zip_code,
         phone_number=shop_in.phone_number,
-        average_wait_time=shop_in.average_wait_time,
         email=shop_in.email,
         owner_id=current_user.id,
+        opening_time=shop_in.opening_time,
+        closing_time=shop_in.closing_time,
+        average_wait_time=shop_in.average_wait_time or 0.0,
     )
     db.add(new_shop)
     db.commit()
     db.refresh(new_shop)
     return new_shop
 
-
 @router.get("/shops/", response_model=List[schemas.ShopResponse])
 async def get_my_shops(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
+    """Get all shops owned by the current user with operating status"""
     logger.debug(f"User ID: {current_user.id}, Role: {current_user.role}")
     
-    # Verify user role explicitly
     if current_user.role != UserRole.SHOP_OWNER:
         logger.error(f"User {current_user.id} has role {current_user.role}, expected {UserRole.SHOP_OWNER}")
         raise HTTPException(
@@ -65,9 +67,15 @@ async def get_my_shops(
         )
     
     shops = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).all()
+    
+    # Add computed fields for each shop
+    for shop in shops:
+        shop.is_open = is_shop_open(shop)
+        shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+        shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+    
     logger.debug(f"Found {len(shops)} shops for user {current_user.id}")
     return shops
-
 
 @router.get("/shops/{shop_id}", response_model=schemas.ShopResponse)
 def get_shop_by_id(
@@ -75,14 +83,20 @@ def get_shop_by_id(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
+    """Get a specific shop by ID with operating status"""
     shop = db.query(models.Shop).filter(
         models.Shop.id == shop_id,
         models.Shop.owner_id == current_user.id
     ).first()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Add computed fields
+    shop.is_open = is_shop_open(shop)
+    shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+    shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+    
     return shop
-
 
 @router.put("/shops/{shop_id}", response_model=schemas.ShopResponse)
 def update_shop(
@@ -91,6 +105,7 @@ def update_shop(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
+    """Update shop details including operating hours"""
     shop = db.query(models.Shop).filter(
         models.Shop.id == shop_id,
         models.Shop.owner_id == current_user.id
@@ -101,11 +116,12 @@ def update_shop(
     # Convert input model to dict, excluding None values
     update_data = shop_in.model_dump(exclude_unset=True)
     
-    # Update shop attributes
-    for field, value in update_data.items():
-        setattr(shop, field, value)
-        
-        # If advertisement fields are being updated, ensure consistency
+    # Handle time fields separately to ensure proper validation
+    time_fields = {'opening_time', 'closing_time'}
+    regular_fields = {k: v for k, v in update_data.items() if k not in time_fields}
+    
+    # Update regular fields
+    for field, value in regular_fields.items():
         if field in ['has_advertisement', 'advertisement_image_url', 'advertisement_start_date', 'advertisement_end_date']:
             if not shop.has_advertisement:
                 shop.advertisement_image_url = None
@@ -115,11 +131,42 @@ def update_shop(
             elif shop.has_advertisement and not shop.advertisement_image_url:
                 shop.has_advertisement = False
                 shop.is_advertisement_active = False
+        else:
+            setattr(shop, field, value)
     
-    db.add(shop)
-    db.commit()
-    db.refresh(shop)
-    return shop
+    # Handle time fields with validation
+    if 'opening_time' in update_data or 'closing_time' in update_data:
+        new_opening_time = update_data.get('opening_time', shop.opening_time)
+        new_closing_time = update_data.get('closing_time', shop.closing_time)
+        
+        # Update the time fields
+        shop.opening_time = new_opening_time
+        shop.closing_time = new_closing_time
+        
+        logger.debug(
+            f"Updated shop hours - Opening: {format_time(new_opening_time)}, "
+            f"Closing: {format_time(new_closing_time)}"
+        )
+    
+    try:
+        db.add(shop)
+        db.commit()
+        db.refresh(shop)
+        
+        # Add computed fields
+        shop.is_open = is_shop_open(shop)
+        shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+        shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+        
+        return shop
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating shop: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while updating the shop"
+        )
 
 @router.delete("/shops/{shop_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_shop(
@@ -666,8 +713,8 @@ def get_daily_report(
 async def upload_advertisement(
     shop_id: int,
     file: UploadFile = File(...),
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: datetime = Form(None),  # Changed to Form
+    end_date: datetime = Form(None),    # Changed to Form
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
@@ -701,7 +748,7 @@ async def upload_advertisement(
     # Update shop with advertisement details
     shop.has_advertisement = True
     shop.advertisement_image_url = f"/static/advertisements/{unique_filename}"
-    shop.advertisement_start_date = start_date
+    shop.advertisement_start_date = start_date if start_date else datetime.utcnow()
     shop.advertisement_end_date = end_date
     shop.is_advertisement_active = True
 

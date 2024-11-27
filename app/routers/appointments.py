@@ -1,12 +1,14 @@
 # app/routers/appointments.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from app.core.dependencies import get_current_active_user
+from sqlalchemy import func
+from app.utils.shop_utils import calculate_wait_time, format_time, is_shop_open
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -75,3 +77,37 @@ def cancel_appointment(
     db.add(appointment)
     db.commit()
     return
+
+
+@router.get("/shops", response_model=schemas.ShopListResponse)
+async def get_shops(
+    page: int = Query(default=1, gt=0),
+    limit: int = Query(default=10, gt=0, le=100),
+    search: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    skip = (page - 1) * limit
+    query = db.query(models.Shop)
+    
+    if search:
+        query = query.filter(
+            models.Shop.name.ilike(f"%{search}%") |
+            models.Shop.address.ilike(f"%{search}%")
+        )
+    
+    total = query.count()
+    shops = query.offset(skip).limit(limit).all()
+    
+    # Calculate wait times and check if shop is open
+    for shop in shops:
+        shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+        shop.is_open = is_shop_open(shop)
+        # Add formatted hours to the response
+        shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+    
+    return {
+        "items": shops,
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }

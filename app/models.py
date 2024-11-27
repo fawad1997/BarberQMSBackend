@@ -106,7 +106,8 @@ class Shop(Base):
     phone_number = Column(String, nullable=True)
     email = Column(String, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    operating_hours = Column(String, nullable=True)  # JSON or structured format
+    opening_time = Column(Time, nullable=False)
+    closing_time = Column(Time, nullable=False)
     average_wait_time = Column(Float, default=0.0)
     has_advertisement = Column(Boolean, default=False)
     advertisement_image_url = Column(String, nullable=True)

@@ -115,6 +115,8 @@ class ShopBase(BaseModel):
     zip_code: str
     phone_number: Optional[str] = None
     email: Optional[str] = None
+    opening_time: time
+    closing_time: time
     average_wait_time: Optional[float] = None
     has_advertisement: Optional[bool] = False
     advertisement_image_url: Optional[str] = None
@@ -134,8 +136,9 @@ class ShopUpdate(BaseModel):
     zip_code: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
+    opening_time: Optional[time] = None
+    closing_time: Optional[time] = None
     average_wait_time: Optional[float] = None
-    # Add advertisement fields
     has_advertisement: Optional[bool] = None
     advertisement_image_url: Optional[str] = None
     advertisement_start_date: Optional[datetime] = None
@@ -148,6 +151,8 @@ class ShopUpdate(BaseModel):
         if v is not None:
             return validate_timezone(v)
         return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ShopResponse(ShopBase):
     id: int
@@ -263,8 +268,10 @@ class LoginRequest(BaseModel):
 
 # Add a new response schema for listing shops
 class ShopListResponse(BaseModel):
-    shops: List[ShopResponse]
+    items: List[ShopBase]
     total: int
+    page: int
+    pages: int
 
     model_config = ConfigDict(from_attributes=True)
 
