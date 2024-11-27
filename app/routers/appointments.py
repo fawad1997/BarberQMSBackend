@@ -92,7 +92,9 @@ async def get_shops(
     if search:
         query = query.filter(
             models.Shop.name.ilike(f"%{search}%") |
-            models.Shop.address.ilike(f"%{search}%")
+            models.Shop.address.ilike(f"%{search}%") |
+            models.Shop.city.ilike(f"%{search}%") |
+            models.Shop.state.ilike(f"%{search}%")
         )
     
     total = query.count()
