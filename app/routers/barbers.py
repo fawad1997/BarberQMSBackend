@@ -1,7 +1,7 @@
 # app/routers/barbers.py
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime
 from app import models, schemas
@@ -67,7 +67,6 @@ def create_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
-    # Check if schedule already exists for this day
     existing_schedule = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.barber_id == barber.id,
         models.BarberSchedule.day_of_week == schedule_in.day_of_week
@@ -89,7 +88,27 @@ def create_schedule(
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
-    return new_schedule
+    
+    # Ensure barber relationship is loaded
+    _ = new_schedule.barber
+    return schemas.BarberScheduleResponse.model_validate(new_schedule)
+
+@router.get("/schedules/", response_model=List[schemas.BarberScheduleResponse])
+def get_my_schedules(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_barber)
+):
+    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    schedules = db.query(models.BarberSchedule).options(
+        joinedload(models.BarberSchedule.barber)
+    ).filter(
+        models.BarberSchedule.barber_id == barber.id
+    ).all()
+    
+    return [schemas.BarberScheduleResponse.model_validate(schedule) for schedule in schedules]
 
 @router.put("/schedules/{schedule_id}", response_model=schemas.BarberScheduleResponse)
 def update_schedule(
@@ -106,7 +125,6 @@ def update_schedule(
         models.BarberSchedule.id == schedule_id,
         models.BarberSchedule.barber_id == barber.id
     ).first()
-    
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
@@ -114,11 +132,26 @@ def update_schedule(
         schedule.start_time = schedule_update.start_time
     if schedule_update.end_time is not None:
         schedule.end_time = schedule_update.end_time
+    if schedule_update.day_of_week is not None:
+        existing_schedule = db.query(models.BarberSchedule).filter(
+            models.BarberSchedule.barber_id == barber.id,
+            models.BarberSchedule.day_of_week == schedule_update.day_of_week,
+            models.BarberSchedule.id != schedule_id
+        ).first()
+        if existing_schedule:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schedule already exists for day {schedule_update.day_of_week}"
+            )
+        schedule.day_of_week = schedule_update.day_of_week
 
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
-    return schedule
+    
+    # Ensure barber relationship is loaded
+    _ = schedule.barber
+    return schemas.BarberScheduleResponse.model_validate(schedule)
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(
@@ -141,20 +174,6 @@ def delete_schedule(
     db.delete(schedule)
     db.commit()
     return
-
-@router.get("/schedules/", response_model=List[schemas.BarberScheduleResponse])
-def get_my_schedules(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_barber)
-):
-    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
-    if not barber:
-        raise HTTPException(status_code=404, detail="Barber profile not found")
-
-    schedules = db.query(models.BarberSchedule).filter(
-        models.BarberSchedule.barber_id == barber.id
-    ).all()
-    return schedules
 
 @router.get("/feedback/", response_model=List[schemas.FeedbackResponse])
 def get_my_feedback(
