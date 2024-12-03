@@ -1,21 +1,6 @@
 version: '3.8'
 
 services:
-  web:
-    build: .
-    command: .
-    volumes:
-      - .:/app
-      - static_volume:/app/static
-    ports:
-      - "8000:8000"
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/barbershop
-      - SECRET_KEY=your-secret-key-here
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
-    depends_on:
-      - db
-
   db:
     image: postgres:15
     volumes:
