@@ -17,15 +17,15 @@ services:
       - db
 
   db:
-    image: postgres:15
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=barbershop
-    ports:
-      - "5432:5432"
+  #  image: postgres:15
+  #  volumes:
+  #    - postgres_data:/var/lib/postgresql/data
+  #  environment:
+  #    - POSTGRES_USER=postgres
+  #    - POSTGRES_PASSWORD=postgres
+  #    - POSTGRES_DB=barbershop
+  #  ports:
+  #    - "5432:5432"
 
 volumes:
   postgres_data:
