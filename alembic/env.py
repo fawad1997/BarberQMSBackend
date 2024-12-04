@@ -32,7 +32,7 @@ config = context.config
 
 # Override sqlalchemy.url with environment variable
 section = config.config_ini_section
-config.set_section_option(section, "sqlalchemy.url", os.getenv("postgresql://db:AVNS_GRGse9lcwDvppxUyKaD@app-d5a7d78e-f494-4edc-85ed-709fcb6ba577-do-user-17895070-0.m.db.ondigitalocean.com:25060/db"))
+config.set_section_option(section, "sqlalchemy.url", os.getenv("DATABASE_URL"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

@@ -10,7 +10,8 @@ from sqlalchemy.exc import OperationalError
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("postgresql://db:AVNS_GRGse9lcwDvppxUyKaD@app-d5a7d78e-f494-4edc-85ed-709fcb6ba577-do-user-17895070-0.m.db.ondigitalocean.com:25060/db")
+# DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = "postgresql://db:AVNS_GRGse9lcwDvppxUyKaD@app-d5a7d78e-f494-4edc-85ed-709fcb6ba577-do-user-17895070-0.m.db.ondigitalocean.com:25060/db"
 
 # Add retry logic for database connection
 def get_engine(retries=5, delay=2):
