@@ -42,6 +42,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
+    print("The postgre url is: ", url)
     context.configure(
         url=url,
         target_metadata=target_metadata,
