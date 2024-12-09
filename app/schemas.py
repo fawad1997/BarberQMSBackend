@@ -108,6 +108,7 @@ class AppointmentResponse(AppointmentBase):
     model_config = ConfigDict(from_attributes=True)
 
 class ShopBase(BaseModel):
+    id: int
     name: str
     address: str
     city: str
@@ -123,6 +124,11 @@ class ShopBase(BaseModel):
     advertisement_start_date: Optional[datetime] = None
     advertisement_end_date: Optional[datetime] = None
     is_advertisement_active: Optional[bool] = False
+    estimated_wait_time: Optional[int] = None
+    is_open: Optional[bool] = None
+    formatted_hours: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ShopCreate(ShopBase):
     pass
@@ -353,5 +359,25 @@ class FeedbackResponse(FeedbackBase):
     @field_validator('created_at')
     def validate_created_at(cls, v):
         return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+class ShopDetailedBarberSchedule(BarberScheduleResponse):
+    day_name: str = ""
+
+    @computed_field
+    def formatted_time(self) -> str:
+        return f"{self.start_time.strftime('%I:%M %p')} - {self.end_time.strftime('%I:%M %p')}"
+
+class ShopDetailedBarber(BarberResponse):
+    schedules: List[ShopDetailedBarberSchedule] = []
+    services: List[ServiceResponse] = []
+
+class ShopDetailedResponse(ShopResponse):
+    barbers: List[ShopDetailedBarber] = []
+    services: List[ServiceResponse] = []
+    estimated_wait_time: Optional[int] = None
+    is_open: bool = False
+    formatted_hours: str = ""
 
     model_config = ConfigDict(from_attributes=True)

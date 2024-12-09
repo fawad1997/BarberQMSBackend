@@ -9,6 +9,7 @@ from typing import List, Optional
 from app.core.dependencies import get_current_active_user
 from sqlalchemy import func
 from app.utils.shop_utils import calculate_wait_time, format_time, is_shop_open
+from sqlalchemy.orm import joinedload
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -104,8 +105,9 @@ async def get_shops(
     for shop in shops:
         shop.estimated_wait_time = calculate_wait_time(db, shop.id)
         shop.is_open = is_shop_open(shop)
-        # Add formatted hours to the response
         shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+        # Ensure shop.id is included in the response
+        shop.id = shop.id  # This is already available from the model, just making it explicit
     
     return {
         "items": shops,
@@ -113,3 +115,52 @@ async def get_shops(
         "page": page,
         "pages": (total + limit - 1) // limit
     }
+
+
+@router.get("/shop/{shop_id}", response_model=schemas.ShopDetailedResponse)
+async def get_shop_details(
+    shop_id: int,
+    db: Session = Depends(get_db)
+):
+    # Get shop with all related data
+    shop = (
+        db.query(models.Shop)
+        .options(
+            joinedload(models.Shop.barbers)
+            .joinedload(models.Barber.services),
+            joinedload(models.Shop.barbers)
+            .joinedload(models.Barber.schedules),
+            joinedload(models.Shop.barbers)
+            .joinedload(models.Barber.user),
+            joinedload(models.Shop.services)
+        )
+        .filter(models.Shop.id == shop_id)
+        .first()
+    )
+    
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
+        )
+
+    # Calculate additional shop details
+    shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+    shop.is_open = is_shop_open(shop)
+    shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
+
+    # Process barber schedules
+    day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    
+    for barber in shop.barbers:
+        # Add user details to barber
+        barber.full_name = barber.user.full_name
+        barber.email = barber.user.email
+        barber.phone_number = barber.user.phone_number
+        barber.is_active = barber.user.is_active
+
+        # Process schedules
+        for schedule in barber.schedules:
+            schedule.day_name = day_names[schedule.day_of_week]
+
+    return shop
