@@ -28,6 +28,7 @@ def create_appointment(
         service_id=appointment_in.service_id,
         appointment_time=appointment_in.appointment_time,
         status=models.AppointmentStatus.SCHEDULED,
+        number_of_people=appointment_in.number_of_people,
     )
 
     if appointment_in.user_id:

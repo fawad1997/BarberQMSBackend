@@ -81,6 +81,7 @@ class AppointmentBase(BaseModel):
     barber_id: int
     service_id: int
     appointment_time: datetime
+    number_of_people: Optional[int] = Field(default=1, ge=1)
 
     # Add validator for appointment_time
     @field_validator('appointment_time')

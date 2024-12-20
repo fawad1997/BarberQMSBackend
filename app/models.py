@@ -198,6 +198,7 @@ class Appointment(Base):
     # Added fields for unregistered users
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True, index=True)
+    number_of_people = Column(Integer, default=1)
 
     # Relationships
     user = relationship("User", back_populates="appointments")
