@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
-from app.models import AppointmentStatus, BarberStatus
+from app.models import AppointmentStatus, BarberStatus, QueueStatus
 from enum import Enum
 from datetime import datetime, timezone, time
 import pytz
@@ -389,5 +389,33 @@ class ShopDetailedResponse(ShopResponse):
     estimated_wait_time: Optional[int] = None
     is_open: bool = False
     formatted_hours: str = ""
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QueueEntryCreatePublic(BaseModel):
+    shop_id: int
+    service_id: Optional[int] = None
+    barber_id: Optional[int] = None
+    full_name: str
+    phone_number: str
+    number_of_people: int = Field(default=1, ge=1)
+
+class QueueEntryPublicResponse(BaseModel):
+    id: int
+    position_in_queue: int
+    full_name: str
+    status: QueueStatus
+    check_in_time: datetime
+    service_start_time: Optional[datetime] = None
+    number_of_people: int
+    barber_id: Optional[int] = None
+    service_id: Optional[int] = None
+
+    @field_validator('check_in_time', 'service_start_time')
+    def validate_times(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
 
     model_config = ConfigDict(from_attributes=True)
