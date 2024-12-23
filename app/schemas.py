@@ -78,12 +78,11 @@ class TokenData(BaseModel):
 
 class AppointmentBase(BaseModel):
     shop_id: int
-    barber_id: int
-    service_id: int
+    barber_id: Optional[int] = None
+    service_id: Optional[int] = None
     appointment_time: datetime
     number_of_people: Optional[int] = Field(default=1, ge=1)
 
-    # Add validator for appointment_time
     @field_validator('appointment_time')
     def validate_appointment_time(cls, v):
         return validate_timezone(v)
@@ -92,6 +91,16 @@ class AppointmentCreate(AppointmentBase):
     user_id: Optional[int] = None
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
+
+    @field_validator('full_name', 'phone_number')
+    def validate_guest_fields(cls, v, info):
+        # Skip validation if field is not provided
+        if info.data.get('user_id') is not None:
+            return v
+        # For guest users, both fields are required
+        if v is None:
+            raise ValueError("full_name and phone_number are required for guest users")
+        return v
 
 class AppointmentStatusUpdate(BaseModel):
     status: AppointmentStatus

@@ -18,10 +18,6 @@ def create_appointment(
     appointment_in: schemas.AppointmentCreate,
     db: Session = Depends(get_db)
 ):
-    # Check barber availability
-    # Implement logic to check if the barber is available at the requested time
-    # ...
-
     new_appointment = models.Appointment(
         shop_id=appointment_in.shop_id,
         barber_id=appointment_in.barber_id,
@@ -29,20 +25,10 @@ def create_appointment(
         appointment_time=appointment_in.appointment_time,
         status=models.AppointmentStatus.SCHEDULED,
         number_of_people=appointment_in.number_of_people,
+        user_id=appointment_in.user_id,
+        full_name=appointment_in.full_name,
+        phone_number=appointment_in.phone_number
     )
-
-    if appointment_in.user_id:
-        # Registered user
-        new_appointment.user_id = appointment_in.user_id
-    else:
-        # Unregistered user
-        new_appointment.full_name = appointment_in.full_name
-        new_appointment.phone_number = appointment_in.phone_number
-        if not appointment_in.full_name or not appointment_in.phone_number:
-            raise HTTPException(
-                status_code=400,
-                detail="Full name and phone number are required for unregistered users",
-            )
 
     db.add(new_appointment)
     db.commit()

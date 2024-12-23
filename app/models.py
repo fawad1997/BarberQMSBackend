@@ -185,17 +185,15 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Made nullable
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False)
-    service_id = Column(Integer, ForeignKey("services.id"), nullable=False)
+    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     appointment_time = Column(DateTime, nullable=False)
     status = Column(Enum(AppointmentStatus), default=AppointmentStatus.SCHEDULED)
     created_at = Column(DateTime, default=func.now())
     actual_start_time = Column(DateTime, nullable=True)
     actual_end_time = Column(DateTime, nullable=True)
-
-    # Added fields for unregistered users
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True, index=True)
     number_of_people = Column(Integer, default=1)
