@@ -38,11 +38,11 @@ def create_appointment(
 
 @router.get("/me", response_model=List[schemas.AppointmentResponse])
 def get_my_appointments(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    phone_number: str = Query(..., description="Phone number to fetch appointments for"),
+    db: Session = Depends(get_db)
 ):
     appointments = db.query(models.Appointment).filter(
-        models.Appointment.user_id == current_user.id
+        models.Appointment.phone_number == phone_number
     ).all()
     return appointments
 
@@ -50,12 +50,12 @@ def get_my_appointments(
 @router.delete("/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_appointment(
     appointment_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    phone_number: str = Query(..., description="Phone number associated with the appointment"),
+    db: Session = Depends(get_db)
 ):
     appointment = db.query(models.Appointment).filter(
         models.Appointment.id == appointment_id,
-        models.Appointment.user_id == current_user.id
+        models.Appointment.phone_number == phone_number
     ).first()
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
