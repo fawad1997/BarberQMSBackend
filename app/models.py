@@ -37,11 +37,10 @@ class AppointmentStatus(enum.Enum):
 
 
 class QueueStatus(enum.Enum):
-    CHECKED_IN = "checked_in"
-    ARRIVED = "arrived"
-    IN_SERVICE = "in_service"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+    CHECKED_IN = "CHECKED_IN"
+    IN_SERVICE = "IN_SERVICE"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
 
 
 # Enum for barber status
@@ -233,7 +232,7 @@ class QueueEntry(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
-    service_id = Column(Integer, ForeignKey("services.id"), nullable=False)
+    service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
     full_name = Column(String, nullable=False)

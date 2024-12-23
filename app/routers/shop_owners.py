@@ -32,6 +32,8 @@ def create_shop(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
+    print("shop_in")
+    print(shop_in)
     """Create a new shop with operating hours"""
     new_shop = models.Shop(
         name=shop_in.name,
@@ -46,6 +48,8 @@ def create_shop(
         closing_time=shop_in.closing_time,
         average_wait_time=shop_in.average_wait_time or 0.0,
     )
+    print("new_shop")
+    print(new_shop)
     db.add(new_shop)
     db.commit()
     db.refresh(new_shop)
