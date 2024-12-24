@@ -70,6 +70,28 @@ def join_queue(
     db.refresh(new_entry)
     return new_entry
 
+@router.get("/check-status", response_model=schemas.QueueEntryPublicResponse)
+def get_queue_status(
+    phone: str,
+    shop_id: int,
+    db: Session = Depends(get_db)
+):
+    # Get the most recent queue entry for the phone number and shop
+    queue_entry = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id,
+        models.QueueEntry.phone_number == phone
+    ).order_by(
+        models.QueueEntry.check_in_time.desc()
+    ).first()
+
+    if not queue_entry:
+        raise HTTPException(
+            status_code=404,
+            detail="No queue entry found for this phone number"
+        )
+
+    return queue_entry
+
 @router.get("/{shop_id}", response_model=List[schemas.QueueEntryPublicResponse])
 def get_queue(
     shop_id: int,
