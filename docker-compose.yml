@@ -12,20 +12,20 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/barbershop
       - SECRET_KEY=your-secret-key-here
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - ACCESS_TOKEN_EXPIRE_MINUTES=3000
     depends_on:
       - db
 
   db:
-  #  image: postgres:15
-  #  volumes:
-  #    - postgres_data:/var/lib/postgresql/data
-  #  environment:
-  #    - POSTGRES_USER=postgres
-  #    - POSTGRES_PASSWORD=postgres
-  #    - POSTGRES_DB=barbershop
-  #  ports:
-  #    - "5432:5432"
+   image: postgres:15
+   volumes:
+     - postgres_data:/var/lib/postgresql/data
+   environment:
+     - POSTGRES_USER=postgres
+     - POSTGRES_PASSWORD=postgres
+     - POSTGRES_DB=barbershop
+   ports:
+     - "5432:5432"
 
 volumes:
   postgres_data:
