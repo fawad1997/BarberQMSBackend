@@ -14,6 +14,7 @@ from app.routers import (
 )
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.database import init_db
 import uvicorn
 from dotenv import load_dotenv
 import os
@@ -42,6 +43,11 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# database initialization
+@app.on_event("startup")
+def on_startup():
+    init_db()
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
