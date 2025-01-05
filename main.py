@@ -31,7 +31,7 @@ load_dotenv()
 origins = [
     "http://localhost:3000",
     "http://localhost:8000",
-    "*"  # Remove this in production
+    "https://walkinonline.com"
 ]
 
 # Update the CORS middleware configuration

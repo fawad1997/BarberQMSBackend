@@ -90,11 +90,15 @@ async def get_shops(
     
     # Calculate wait times and check if shop is open
     for shop in shops:
-        shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+        shop.estimated_wait_time = calculate_wait_time(
+            db=db,
+            shop_id=shop.id,
+            service_id=None,  # Get general wait time
+            barber_id=None    # No specific barber
+        )
         shop.is_open = is_shop_open(shop)
         shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
-        # Ensure shop.id is included in the response
-        shop.id = shop.id  # This is already available from the model, just making it explicit
+        shop.id = shop.id
     
     return {
         "items": shops,
@@ -132,7 +136,12 @@ async def get_shop_details(
         )
 
     # Calculate additional shop details
-    shop.estimated_wait_time = calculate_wait_time(db, shop.id)
+    shop.estimated_wait_time = calculate_wait_time(
+        db=db,
+        shop_id=shop.id,
+        service_id=None,  # Get general wait time
+        barber_id=None    # No specific barber
+    )
     shop.is_open = is_shop_open(shop)
     shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
 
