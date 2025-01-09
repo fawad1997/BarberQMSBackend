@@ -9,12 +9,14 @@ ENV PYTHONUNBUFFERED 1
 # Install PostgreSQL client for DB interaction (optional, if needed for debugging)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        postgresql-client \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install the Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade bcrypt passlib
+
 
 # Copy the application code
 COPY . .
@@ -28,5 +30,4 @@ RUN mkdir -p static/advertisements
 # Expose the port the app runs on
 EXPOSE 8000
 
-# Start the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -28,11 +28,7 @@ app = FastAPI(
 load_dotenv()
 
 # Create a list of allowed origins
-origins = [
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "https://walkinonline.com"
-]
+origins = ["*"]
 
 # Update the CORS middleware configuration
 app.add_middleware(
@@ -49,7 +45,7 @@ app.add_middleware(
 def on_startup():
     init_db()
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(shop_owners.router)
