@@ -37,6 +37,7 @@ class AppointmentStatus(enum.Enum):
 
 
 class QueueStatus(enum.Enum):
+    ARRIVED = "ARRIVED"
     CHECKED_IN = "CHECKED_IN"
     IN_SERVICE = "IN_SERVICE"
     COMPLETED = "COMPLETED"

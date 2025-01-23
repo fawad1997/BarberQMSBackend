@@ -330,12 +330,12 @@ class TokenWithUserDetails(Token):
     model_config = ConfigDict(from_attributes=True)
 
 class QueueStatusUpdate(BaseModel):
-    status: str
+    status: QueueStatus
 
 class QueueEntryBase(BaseModel):
     shop_id: int
     user_id: Optional[int] = None
-    service_id: int
+    service_id: Optional[int] = None
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
 
@@ -344,10 +344,13 @@ class QueueEntryCreate(QueueEntryBase):
 
 class QueueEntryResponse(QueueEntryBase):
     id: int
-    status: str
+    status: QueueStatus
+    position_in_queue: int
     check_in_time: datetime
     service_start_time: Optional[datetime] = None
     service_end_time: Optional[datetime] = None
+    barber_id: Optional[int] = None
+    number_of_people: int = 1
 
     # Add validators for all datetime fields
     @field_validator('check_in_time', 'service_start_time', 'service_end_time')
