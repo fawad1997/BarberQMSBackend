@@ -602,10 +602,29 @@ def get_queue(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    queue_entries = db.query(models.QueueEntry).filter(
-        models.QueueEntry.shop_id == shop.id,
-        models.QueueEntry.status.in_([models.QueueStatus.CHECKED_IN, models.QueueStatus.ARRIVED])
-    ).order_by(models.QueueEntry.check_in_time).all()
+    # Use joinedload to efficiently load related barber and service data
+    queue_entries = (
+        db.query(models.QueueEntry)
+        .options(
+            joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+            joinedload(models.QueueEntry.service)
+        )
+        .filter(
+            models.QueueEntry.shop_id == shop.id,
+            models.QueueEntry.status.in_([
+                models.QueueStatus.CHECKED_IN,
+                models.QueueStatus.IN_SERVICE
+            ])
+        )
+        .order_by(models.QueueEntry.check_in_time)
+        .all()
+    )
+
+    # Transform the data to include barber and service information
+    for entry in queue_entries:
+        if entry.barber:
+            entry.barber.full_name = entry.barber.user.full_name
+
     return queue_entries
 
 

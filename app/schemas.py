@@ -342,6 +342,21 @@ class QueueEntryBase(BaseModel):
 class QueueEntryCreate(QueueEntryBase):
     pass
 
+class ServiceInfo(BaseModel):
+    id: int
+    name: str
+    duration: int
+    price: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+class BarberInfo(BaseModel):
+    id: int
+    full_name: str
+    status: BarberStatus
+
+    model_config = ConfigDict(from_attributes=True)
+
 class QueueEntryResponse(QueueEntryBase):
     id: int
     status: QueueStatus
@@ -351,6 +366,8 @@ class QueueEntryResponse(QueueEntryBase):
     service_end_time: Optional[datetime] = None
     barber_id: Optional[int] = None
     number_of_people: int = 1
+    barber: Optional[BarberInfo] = None
+    service: Optional[ServiceInfo] = None
 
     # Add validators for all datetime fields
     @field_validator('check_in_time', 'service_start_time', 'service_end_time')

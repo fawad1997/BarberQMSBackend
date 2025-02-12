@@ -73,6 +73,13 @@ If you prefer to run the application without Docker, follow these steps:
    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
    ```
 
+If you are unable to run the above command, try running the following command:
+```bash
+Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope Process
+.\env\Scripts\activate  
+```
+	
+
 2. **Install Dependencies**
 
    Make sure you have a `requirements.txt` file in your project. If it’s not present, create it with the necessary dependencies. Then run:
