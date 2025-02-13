@@ -1139,3 +1139,184 @@ def delete_barber_schedule(
     db.commit()
     return
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, joinedload
+from datetime import datetime, time, timedelta
+from typing import List
+from app import models, schemas
+from app.database import get_db
+from app.core.dependencies import get_current_user_by_role
+
+# Use the shop owner role dependency
+get_current_shop_owner = get_current_user_by_role(models.UserRole.SHOP_OWNER)
+
+# router = APIRouter(prefix="/shop-owners", tags=["Shop Owners"])
+
+@router.get("/dashboard")
+def get_shops_dashboard(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """
+    Dashboard endpoint for a shop owner that aggregates metrics across all shops they own.
+    
+    Metrics include:
+      - Total Customers Today: Count of check-ins (from queue entries) and appointments for today.
+      - Customers in Queue: Count of active queue entries (e.g., CHECKED_IN or IN_SERVICE).
+      - Customers Served: Count of appointments marked as COMPLETED today.
+      - Cancellations: Count of appointments marked as CANCELLED today.
+      - Average Wait Time: For served queue entries, computed from (service_start_time - check_in_time).
+      - Historical Trends: Daily totals and average wait times for the past 7 days.
+      - Barber Management: For each barber in a shop, the number of appointments served today.
+    """
+    # Define today's start and end in UTC (adjust if needed)
+    today = datetime.utcnow().date()
+    start_of_day = datetime.combine(today, time.min)
+    end_of_day = datetime.combine(today, time.max)
+
+    # Get all shops owned by the current shop owner
+    shops = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).all()
+    shops_dashboard = []
+
+    for shop in shops:
+        # Total customer visits for today (from appointments and queue check-ins)
+        appointments_count = db.query(models.Appointment).filter(
+            models.Appointment.shop_id == shop.id,
+            models.Appointment.appointment_time >= start_of_day,
+            models.Appointment.appointment_time <= end_of_day
+        ).count()
+
+        queue_checkins_count = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id == shop.id,
+            models.QueueEntry.check_in_time >= start_of_day,
+            models.QueueEntry.check_in_time <= end_of_day
+        ).count()
+
+        total_customers_today = appointments_count + queue_checkins_count
+
+        # Customers currently waiting in queue (e.g., CHECKED_IN or IN_SERVICE)
+        customers_in_queue = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id == shop.id,
+            models.QueueEntry.status.in_([models.QueueStatus.CHECKED_IN, models.QueueStatus.IN_SERVICE])
+        ).count()
+
+        # Customers served today (using appointments with COMPLETED status)
+        customers_served = db.query(models.Appointment).filter(
+            models.Appointment.shop_id == shop.id,
+            models.Appointment.status == models.AppointmentStatus.COMPLETED,
+            models.Appointment.appointment_time >= start_of_day,
+            models.Appointment.appointment_time <= end_of_day
+        ).count()
+
+        # Cancellations today (using appointments with CANCELLED status)
+        cancellations = db.query(models.Appointment).filter(
+            models.Appointment.shop_id == shop.id,
+            models.Appointment.status == models.AppointmentStatus.CANCELLED,
+            models.Appointment.appointment_time >= start_of_day,
+            models.Appointment.appointment_time <= end_of_day
+        ).count()
+
+        # Calculate average wait time (in minutes) from queue entries that are COMPLETED
+        served_queue_entries = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id == shop.id,
+            models.QueueEntry.status == models.QueueStatus.COMPLETED,
+            models.QueueEntry.check_in_time.isnot(None),
+            models.QueueEntry.service_start_time.isnot(None),
+            models.QueueEntry.check_in_time >= start_of_day,
+            models.QueueEntry.check_in_time <= end_of_day
+        ).all()
+        wait_times = []
+        for entry in served_queue_entries:
+            wait_seconds = (entry.service_start_time - entry.check_in_time).total_seconds()
+            wait_times.append(wait_seconds)
+        average_wait_time = (sum(wait_times) / len(wait_times) / 60) if wait_times else 0
+
+        # For each barber in the shop, get the number of served appointments today.
+        barbers = db.query(models.Barber).filter(models.Barber.shop_id == shop.id).all()
+        barber_stats = []
+        for barber in barbers:
+            served_by_barber = db.query(models.Appointment).filter(
+                models.Appointment.barber_id == barber.id,
+                models.Appointment.status == models.AppointmentStatus.COMPLETED,
+                models.Appointment.appointment_time >= start_of_day,
+                models.Appointment.appointment_time <= end_of_day
+            ).count()
+            barber_stats.append({
+                "barber_id": barber.id,
+                "full_name": barber.user.full_name if barber.user else "",
+                "customers_served": served_by_barber
+            })
+
+        shops_dashboard.append({
+            "shop_id": shop.id,
+            "shop_name": shop.name,
+            "total_customers_today": total_customers_today,
+            "customers_in_queue": customers_in_queue,
+            "customers_served": customers_served,
+            "cancellations": cancellations,
+            "average_wait_time": average_wait_time,
+            "barber_management": barber_stats
+        })
+
+    # Overall daily insights across all shops owned by the user
+    total_visits_today = sum(item["total_customers_today"] for item in shops_dashboard)
+    wait_time_values = [item["average_wait_time"] for item in shops_dashboard if item["average_wait_time"] > 0]
+    overall_avg_wait_time = (sum(wait_time_values) / len(wait_time_values)) if wait_time_values else 0
+
+    daily_insights = {
+        "total_customer_visits_today": total_visits_today,
+        "average_wait_time": overall_avg_wait_time
+    }
+
+    # Historical trends for the past 7 days (across all shops)
+    historical_trends = []
+    # Get a list of shop IDs for filtering
+    shop_ids = [shop.id for shop in shops]
+    for i in range(7):
+        day = today - timedelta(days=i)
+        day_start = datetime.combine(day, time.min)
+        day_end = datetime.combine(day, time.max)
+        
+        day_appointments = db.query(models.Appointment).filter(
+            models.Appointment.shop_id.in_(shop_ids),
+            models.Appointment.appointment_time >= day_start,
+            models.Appointment.appointment_time <= day_end
+        ).count()
+        
+        day_queue_checkins = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id.in_(shop_ids),
+            models.QueueEntry.check_in_time >= day_start,
+            models.QueueEntry.check_in_time <= day_end
+        ).count()
+        
+        total_visits_day = day_appointments + day_queue_checkins
+
+        served_entries_day = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id.in_(shop_ids),
+            models.QueueEntry.status == models.QueueStatus.COMPLETED,
+            models.QueueEntry.check_in_time.isnot(None),
+            models.QueueEntry.service_start_time.isnot(None),
+            models.QueueEntry.check_in_time >= day_start,
+            models.QueueEntry.check_in_time <= day_end
+        ).all()
+        day_wait_times = [
+            (entry.service_start_time - entry.check_in_time).total_seconds() 
+            for entry in served_entries_day
+        ]
+        avg_wait_day = (sum(day_wait_times) / len(day_wait_times) / 60) if day_wait_times else 0
+
+        historical_trends.append({
+            "date": day.strftime("%Y-%m-%d"),
+            "total_visits": total_visits_day,
+            "average_wait_time": avg_wait_day
+        })
+    # Reverse so that trends go from oldest to newest
+    historical_trends = list(reversed(historical_trends))
+
+    # Aggregate response data
+    response_data = {
+        "shops": shops_dashboard,
+        "daily_insights": daily_insights,
+        "historical_trends": historical_trends
+    }
+    return response_data
