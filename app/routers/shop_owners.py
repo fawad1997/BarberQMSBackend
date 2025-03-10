@@ -81,6 +81,15 @@ async def get_my_shops(
     logger.debug(f"Found {len(shops)} shops for user {current_user.id}")
     return shops
 
+# Add duplicate route without trailing slash to prevent redirects
+@router.get("/shops", response_model=List[schemas.ShopResponse])
+async def get_my_shops_no_slash(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Get all shops owned by the current user (no trailing slash version)"""
+    return await get_my_shops(db=db, current_user=current_user)
+
 @router.get("/shops/{shop_id}", response_model=schemas.ShopResponse)
 def get_shop_by_id(
     shop_id: int,
