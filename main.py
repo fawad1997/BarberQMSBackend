@@ -29,9 +29,10 @@ load_dotenv()
 
 # Create a list of allowed origins
 origins = [
-    "http://localhost:3000",
+    "http://localhost:8080",
     "http://localhost:8000",
     "https://walkinonline.com",
+    "https://www.walkinonline.com",
     "*"
 ]
 

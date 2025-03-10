@@ -449,3 +449,11 @@ class QueueEntryPublicResponse(BaseModel):
         return v
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class QueueReorderItem(BaseModel):
+    queue_id: int
+    new_position: int
+
+class QueueReorderRequest(BaseModel):
+    reordered_entries: List[QueueReorderItem]

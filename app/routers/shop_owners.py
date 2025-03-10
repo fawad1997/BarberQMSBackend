@@ -1320,3 +1320,58 @@ def get_shops_dashboard(
         "historical_trends": historical_trends
     }
     return response_data
+
+
+@router.put("/shops/{shop_id}/queue/reorder", response_model=List[schemas.QueueEntryResponse])
+def reorder_queue_entries(
+    shop_id: int,
+    reorder_req: schemas.QueueReorderRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """
+    Reorder queue entries for a shop. For each entry, update:
+      - position_in_queue (to the new position)
+      - estimated service start time (if the customer is still waiting)
+    
+    The estimated service start time is computed as:
+       current time + (new_position - 1) * (shop.average_wait_time in minutes)
+    """
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Process each reorder item
+    for item in reorder_req.reordered_entries:
+        queue_entry = db.query(models.QueueEntry).filter(
+            models.QueueEntry.id == item.queue_id,
+            models.QueueEntry.shop_id == shop_id
+        ).first()
+        if not queue_entry:
+            raise HTTPException(status_code=404, detail=f"Queue entry {item.queue_id} not found")
+        
+        # Update the queue position
+        queue_entry.position_in_queue = item.new_position
+        
+        # For waiting customers, update the estimated service start time.
+        if queue_entry.status == models.QueueStatus.CHECKED_IN:
+            now = datetime.utcnow()
+            # Calculate offset in minutes multiplied by (new_position - 1)
+            offset = timedelta(minutes=shop.average_wait_time * (item.new_position - 1))
+            queue_entry.service_start_time = now + offset
+        
+        db.add(queue_entry)
+    
+    db.commit()
+    
+    # Retrieve and return updated queue entries, sorted by position
+    updated_entries = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id
+    ).order_by(models.QueueEntry.position_in_queue).all()
+    
+    return updated_entries
