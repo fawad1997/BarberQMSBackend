@@ -1268,6 +1268,22 @@ def update_barber_schedule(
     # Return the response using Pydantic's model_validate
     return schemas.BarberScheduleResponse.model_validate(schedule)
 
+# Add duplicate route with trailing slash to ensure URL matching
+@router.put(
+    "/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}/", 
+    response_model=schemas.BarberScheduleResponse
+)
+def update_barber_schedule_with_slash(
+    shop_id: int,
+    barber_id: int,
+    schedule_id: int,
+    schedule_update: schemas.BarberScheduleUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route with trailing slash to ensure URL matching"""
+    return update_barber_schedule(shop_id, barber_id, schedule_id, schedule_update, db, current_user)
+
 @router.delete("/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_barber_schedule(
     shop_id: int,
@@ -1302,6 +1318,18 @@ def delete_barber_schedule(
     db.delete(schedule)
     db.commit()
     return
+
+# Add duplicate route with trailing slash for delete operation
+@router.delete("/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}/", status_code=status.HTTP_204_NO_CONTENT)
+def delete_barber_schedule_with_slash(
+    shop_id: int,
+    barber_id: int,
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route with trailing slash to ensure URL matching for delete operation"""
+    return delete_barber_schedule(shop_id, barber_id, schedule_id, db, current_user)
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
