@@ -681,7 +681,6 @@ def create_service(
     return new_service
 
 
-
 @router.get("/shops/{shop_id}/services/", response_model=List[schemas.ServiceResponse])
 def get_services(
     shop_id: int,
@@ -698,7 +697,15 @@ def get_services(
     services = db.query(models.Service).filter(models.Service.shop_id == shop.id).all()
     return services
 
-
+# Add duplicate route without trailing slash to ensure URL matching
+@router.get("/shops/{shop_id}/services", response_model=List[schemas.ServiceResponse])
+def get_services_no_slash(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route without trailing slash to ensure URL matching"""
+    return get_services(shop_id, db, current_user)
 
 @router.put("/shops/{shop_id}/services/{service_id}", response_model=schemas.ServiceResponse)
 def update_service(
