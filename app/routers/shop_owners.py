@@ -322,6 +322,12 @@ def add_barber(
         }
         
         return response_data
+    
+    except HTTPException as http_ex:
+        # Re-raise HTTP exceptions with their original status code and detail
+        db.rollback()
+        logger.error(f"HTTP exception in add_barber: {http_ex.detail}, status_code: {http_ex.status_code}")
+        raise
         
     except Exception as e:
         db.rollback()
@@ -355,65 +361,87 @@ def update_barber(
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Update barber details"""
-    # First, verify shop ownership
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
-    # Add logging to debug the query
-    logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id}")
-    
-    # Get barber with a join to ensure we have all related data
-    barber = (
-        db.query(models.Barber)
-        .join(models.User)
-        .filter(
-            models.Barber.id == barber_id,
-            models.Barber.shop_id == shop_id  # Changed from shop.id to shop_id
-        )
-        .first()
-    )
-    
-    # Add debug logging
-    logger.debug(f"Barber query result: {barber}")
-    
-    if not barber:
-        # Add more detailed error information
-        existing_barber = db.query(models.Barber).filter(models.Barber.id == barber_id).first()
-        if existing_barber:
-            logger.error(f"Barber exists but in different shop. Barber shop_id: {existing_barber.shop_id}, Requested shop_id: {shop_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Barber with ID {barber_id} not found in shop {shop_id}"
-            )
-        raise HTTPException(status_code=404, detail="Barber not found")
-
-    # Get associated user (should always exist due to the join above)
-    user = barber.user
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Update user details if provided
-    if barber_in.full_name is not None:
-        user.full_name = barber_in.full_name
-    if barber_in.email is not None:
-        user.email = barber_in.email
-    if barber_in.phone_number is not None:
-        user.phone_number = barber_in.phone_number
-    # Only update password if it's provided and not None or empty string
-    if barber_in.password and barber_in.password.strip():
-        user.hashed_password = get_password_hash(barber_in.password)
-    if barber_in.is_active is not None:
-        user.is_active = barber_in.is_active
-
-    # Update barber status if provided
-    if barber_in.status is not None:
-        barber.status = barber_in.status
-
     try:
+        # First, verify shop ownership
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).first()
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
+
+        # Add logging to debug the query
+        logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id}")
+        
+        # Get barber with a join to ensure we have all related data
+        barber = (
+            db.query(models.Barber)
+            .join(models.User)
+            .filter(
+                models.Barber.id == barber_id,
+                models.Barber.shop_id == shop_id
+            )
+            .first()
+        )
+        
+        # Add debug logging
+        logger.debug(f"Barber query result: {barber}")
+        
+        if not barber:
+            # Add more detailed error information
+            existing_barber = db.query(models.Barber).filter(models.Barber.id == barber_id).first()
+            if existing_barber:
+                logger.error(f"Barber exists but in different shop. Barber shop_id: {existing_barber.shop_id}, Requested shop_id: {shop_id}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Barber with ID {barber_id} not found in shop {shop_id}"
+                )
+            raise HTTPException(status_code=404, detail="Barber not found")
+
+        # Get associated user (should always exist due to the join above)
+        user = barber.user
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Update user details if provided
+        if barber_in.full_name is not None:
+            user.full_name = barber_in.full_name
+        if barber_in.email is not None:
+            # Check if email is already in use by another user
+            existing_user = db.query(models.User).filter(
+                models.User.email == barber_in.email,
+                models.User.id != user.id
+            ).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email is already in use by another user"
+                )
+            user.email = barber_in.email
+            
+        if barber_in.phone_number is not None:
+            # Check if phone number is already in use by another user
+            existing_user = db.query(models.User).filter(
+                models.User.phone_number == barber_in.phone_number,
+                models.User.id != user.id
+            ).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Phone number is already in use by another user"
+                )
+            user.phone_number = barber_in.phone_number
+            
+        # Only update password if it's provided and not None or empty string
+        if barber_in.password and barber_in.password.strip():
+            user.hashed_password = get_password_hash(barber_in.password)
+        if barber_in.is_active is not None:
+            user.is_active = barber_in.is_active
+
+        # Update barber status if provided
+        if barber_in.status is not None:
+            barber.status = barber_in.status
+
         db.add(user)
         db.add(barber)
         db.commit()
@@ -429,18 +457,54 @@ def update_barber(
             "full_name": user.full_name,
             "email": user.email,
             "phone_number": user.phone_number,
-            "is_active": user.is_active
+            "is_active": user.is_active,
+            "services": [{
+                "id": s.id,
+                "name": s.name,
+                "duration": s.duration,
+                "price": s.price,
+                "shop_id": s.shop_id
+            } for s in barber.services]
         }
         
         return response_data
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as they already have status codes
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating barber: {str(e)}")
+        
+        # Handle database constraint violations with specific messages
+        if "unique constraint" in str(e).lower() and "phone_number" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Phone number is already in use by another user"
+            )
+        elif "unique constraint" in str(e).lower() and "email" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already in use by another user"
+            )
+        
+        # Generic error for other exceptions
         raise HTTPException(
-            status_code=500,
-            detail="An error occurred while updating the barber"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while updating the barber: {str(e)}"
         )
+
+# Add duplicate route with trailing slash to prevent URL mismatch issues
+@router.put("/shops/{shop_id}/barbers/{barber_id}/", response_model=schemas.BarberResponse)
+def update_barber_with_slash(
+    shop_id: int,
+    barber_id: int,
+    barber_in: schemas.BarberUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route with trailing slash to ensure URL matching"""
+    return update_barber(shop_id, barber_id, barber_in, db, current_user)
 
 
 @router.patch("/shops/{shop_id}/barbers/{barber_id}/status", response_model=schemas.BarberResponse)
@@ -537,27 +601,57 @@ def remove_barber(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    try:
+        shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
-    barber = db.query(models.Barber).filter(
-        models.Barber.id == barber_id,
-        models.Barber.shop_id == shop.id
-    ).first()
-    if not barber:
-        raise HTTPException(status_code=404, detail="Barber not found")
+        barber = db.query(models.Barber).filter(
+            models.Barber.id == barber_id,
+            models.Barber.shop_id == shop.id
+        ).first()
+        if not barber:
+            raise HTTPException(status_code=404, detail="Barber not found")
 
-    # Update user's role back to USER
-    user = db.query(models.User).filter(models.User.id == barber.user_id).first()
-    if user:
-        user.role = models.UserRole.USER
-        db.add(user)
+        # Get the user associated with this barber
+        user = db.query(models.User).filter(models.User.id == barber.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Store user details for logging
+        user_email = user.email
+        user_id = user.id
+        
+        # Delete the barber record first
+        db.delete(barber)
+        
+        # Then delete the user record
+        db.delete(user)
+        
+        db.commit()
+        logger.info(f"Deleted barber ID {barber_id} and user ID {user_id} (email: {user_email})")
+        return
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting barber and user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while deleting the barber: {str(e)}"
+        )
 
-    db.delete(barber)
-    db.commit()
-    return
-
+# Add a duplicate route with trailing slash
+@router.delete("/shops/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
+def remove_barber_with_slash(
+    barber_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route with trailing slash to ensure URL matching"""
+    return remove_barber(barber_id, db, current_user)
 
 
 @router.post("/shops/{shop_id}/services/", response_model=schemas.ServiceResponse)
@@ -1445,3 +1539,34 @@ def reorder_queue_entries(
     ).order_by(models.QueueEntry.position_in_queue).all()
     
     return updated_entries
+
+# Add a shop-specific route for more consistent API design
+@router.delete("/shops/{shop_id}/barbers/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_barber_with_shop(
+    shop_id: int,
+    barber_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Shop-specific route for barber deletion - maintains consistent API design"""
+    # Verify shop ownership explicitly
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Delegate to the existing implementation
+    return remove_barber(barber_id, db, current_user)
+
+# Add a shop-specific route with trailing slash
+@router.delete("/shops/{shop_id}/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
+def remove_barber_with_shop_and_slash(
+    shop_id: int,
+    barber_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Shop-specific route with trailing slash for barber deletion"""
+    return remove_barber_with_shop(shop_id, barber_id, db, current_user)
