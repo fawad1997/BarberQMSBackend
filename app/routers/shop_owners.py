@@ -232,57 +232,118 @@ def add_barber(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    # Find or create the user to assign as a barber
-    user = db.query(models.User).filter(models.User.email == barber_in.email).first()
-    if not user:
-        # Create a new user account with default or provided password
-        password = barber_in.password if barber_in.password else "Temp1234"
-        hashed_password = get_password_hash(password)
-        user = models.User(
-            full_name=barber_in.full_name,
-            email=barber_in.email,
-            phone_number=barber_in.phone_number,
-            hashed_password=hashed_password,
-            role=models.UserRole.BARBER,
-            is_active=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    else:
-        # User exists
-        if user.role != models.UserRole.USER:
-            raise HTTPException(status_code=400, detail="User is already assigned a role")
-        # Update user's role to barber
-        user.role = models.UserRole.BARBER
-        if barber_in.password:  # Update password if provided
-            user.hashed_password = get_password_hash(barber_in.password)
-        db.add(user)
-        db.commit()
-
-    # Create barber profile with status
-    new_barber = models.Barber(
-        user_id=user.id,
-        shop_id=shop.id,
-        status=barber_in.status or models.BarberStatus.AVAILABLE
-    )
-    db.add(new_barber)
-    db.commit()
-    db.refresh(new_barber)
-
-    # Create response dictionary with all required fields
-    response_data = {
-        "id": new_barber.id,
-        "user_id": user.id,
-        "shop_id": shop.id,
-        "status": new_barber.status,
-        "full_name": user.full_name,
-        "email": user.email,
-        "phone_number": user.phone_number,
-        "is_active": user.is_active
-    }
+    # Check if a user with the same email exists
+    user_by_email = db.query(models.User).filter(models.User.email == barber_in.email).first()
     
-    return response_data
+    # Check if a user with the same phone number exists
+    user_by_phone = db.query(models.User).filter(models.User.phone_number == barber_in.phone_number).first()
+
+    # If both exist and are different users, we have a conflict
+    if user_by_email and user_by_phone and user_by_email.id != user_by_phone.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email has a different phone number than provided, and another user already has this phone number"
+        )
+
+    # If user exists by phone but not email, we have a phone number conflict
+    if not user_by_email and user_by_phone:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this phone number already exists but with a different email"
+        )
+
+    # Use existing user if found by email
+    user = user_by_email
+    
+    try:
+        if not user:
+            # Create a new user account with default or provided password
+            password = barber_in.password if barber_in.password else "Temp1234"
+            hashed_password = get_password_hash(password)
+            user = models.User(
+                full_name=barber_in.full_name,
+                email=barber_in.email,
+                phone_number=barber_in.phone_number,
+                hashed_password=hashed_password,
+                role=models.UserRole.BARBER,
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            # User exists, check if they can be made a barber
+            if user.role != models.UserRole.USER:
+                # Check if they're already a barber for this shop
+                existing_barber = db.query(models.Barber).filter(
+                    models.Barber.user_id == user.id,
+                    models.Barber.shop_id == shop_id
+                ).first()
+                
+                if existing_barber:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, 
+                        detail="This user is already a barber for this shop"
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, 
+                        detail=f"User already has role: {user.role.value}"
+                    )
+                
+            # Update user's role to barber
+            user.role = models.UserRole.BARBER
+            if barber_in.password:  # Update password if provided
+                user.hashed_password = get_password_hash(barber_in.password)
+            db.add(user)
+            db.commit()
+
+        # Create barber profile with status
+        new_barber = models.Barber(
+            user_id=user.id,
+            shop_id=shop.id,
+            status=barber_in.status or models.BarberStatus.AVAILABLE
+        )
+        db.add(new_barber)
+        db.commit()
+        db.refresh(new_barber)
+
+        # Create response dictionary with all required fields
+        response_data = {
+            "id": new_barber.id,
+            "user_id": user.id,
+            "shop_id": shop.id,
+            "status": new_barber.status,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "is_active": user.is_active,
+            "services": []  # Add empty services array to match the response model
+        }
+        
+        return response_data
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding barber: {str(e)}")
+        
+        # Handle database constraint violations with more specific messages
+        if "unique constraint" in str(e).lower() and "phone_number" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Phone number is already in use by another user"
+            )
+        elif "unique constraint" in str(e).lower() and "email" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already in use by another user"
+            )
+        
+        # Generic error for other exceptions
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while adding the barber"
+        )
 
 
 @router.put("/shops/{shop_id}/barbers/{barber_id}", response_model=schemas.BarberResponse)
