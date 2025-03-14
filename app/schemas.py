@@ -431,7 +431,15 @@ class QueueEntryCreatePublic(BaseModel):
     phone_number: str
     number_of_people: int = Field(default=1, ge=1)
 
+def validate_timezone(dt: datetime) -> datetime:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TIMEZONE)
+
 class QueueEntryPublicResponse(BaseModel):
+    shop_id: int
     id: int
     position_in_queue: int
     full_name: str
@@ -441,12 +449,14 @@ class QueueEntryPublicResponse(BaseModel):
     number_of_people: int
     barber_id: Optional[int] = None
     service_id: Optional[int] = None
+    estimated_wait_time: Optional[int] = None  # <-- New Field in minutes
 
-    @field_validator('check_in_time', 'service_start_time')
+    @field_validator('check_in_time', 'service_start_time', mode='before')
     def validate_times(cls, v):
-        if v is not None:
-            return validate_timezone(v)
-        return v
+        if v is None:
+            return None
+        return validate_timezone(v)
+
 
     model_config = ConfigDict(from_attributes=True)
 

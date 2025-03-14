@@ -97,43 +97,111 @@ def join_queue(
     return new_entry
 
 
-# @router.get("/{shop_id}", response_model=List[schemas.QueueEntryPublicResponse])
-# def get_queue(shop_id: int, db: Session = Depends(get_db)):
-#     entries = db.query(models.QueueEntry).filter(
-#         models.QueueEntry.shop_id == shop_id,
-#         models.QueueEntry.status.in_([
-#             models.QueueStatus.CHECKED_IN, 
-#             models.QueueStatus.IN_SERVICE
-#         ])
-#     ).order_by(models.QueueEntry.position_in_queue.asc()).all()
-
-#     if not entries:
-#         raise HTTPException(status_code=404, detail="No active queue entries")
-
-#     return entries
-
-
 @router.get("/check-status", response_model=schemas.QueueEntryPublicResponse)
 def get_queue_status(
     phone: str,
     shop_id: int,
     db: Session = Depends(get_db)
 ):
-    # Get the most recent queue entry for the phone number and shop
+    current_time = datetime.utcnow()
+
+    # Validate shop exists and get shop data
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Use shop average_wait_time as default duration
+    default_duration = shop.average_wait_time or 20  # fallback to 20 if average_wait_time is None
+
     queue_entry = db.query(models.QueueEntry).filter(
         models.QueueEntry.shop_id == shop_id,
-        models.QueueEntry.phone_number == phone
-    ).order_by(
-        models.QueueEntry.check_in_time.desc()
-    ).first()
+        models.QueueEntry.phone_number == phone,
+        models.QueueEntry.status.in_([
+            models.QueueStatus.CHECKED_IN, 
+            models.QueueStatus.IN_SERVICE, 
+            models.QueueStatus.ARRIVED
+        ])
+    ).order_by(models.QueueEntry.check_in_time.desc()).first()
 
     if not queue_entry:
-        raise HTTPException(
-            status_code=404,
-            detail="No queue entry found for this phone number"
-        )
+        raise HTTPException(status_code=404, detail="Queue entry not found")
 
-    return queue_entry
+    # Calculate estimated wait time
+    estimated_wait_time = 0
+
+    if queue_entry.status == models.QueueStatus.CHECKED_IN:
+        active_entries = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id == shop_id,
+            models.QueueEntry.status == models.QueueStatus.CHECKED_IN,
+            models.QueueEntry.position_in_queue < queue_entry.position_in_queue
+        ).order_by(models.QueueEntry.position_in_queue.asc()).all()
+
+        cumulative_duration = 0
+        for entry in active_entries:
+            if entry.service:
+                cumulative_duration += entry.service.duration
+            else:
+                cumulative_duration += default_duration  # Use shop's average wait time
+
+        earliest_barber_available_time = None
+        barbers = db.query(models.Barber).filter(models.Barber.shop_id == shop_id).all()
+
+        for barber in barbers:
+            if barber.status == models.BarberStatus.AVAILABLE:
+                barber_available_time = current_time
+            else:
+                ongoing_entry = db.query(models.QueueEntry).filter(
+                    models.QueueEntry.barber_id == barber.id,
+                    models.QueueEntry.status == models.QueueStatus.IN_SERVICE
+                ).order_by(models.QueueEntry.service_end_time.desc()).first()
+
+                if ongoing_entry and ongoing_entry.service_end_time:
+                    barber_available_time = ongoing_entry.service_end_time
+                else:
+                    barber_available_time = current_time
+
+            next_appointment = db.query(models.Appointment).filter(
+                models.Appointment.barber_id == barber.id,
+                models.Appointment.appointment_time > current_time,
+                models.Appointment.status == models.AppointmentStatus.SCHEDULED
+            ).order_by(models.Appointment.appointment_time.asc()).first()
+
+            if next_appointment:
+                gap = (next_appointment.appointment_time - barber_available_time).total_seconds() / 60
+                if gap >= cumulative_duration + (queue_entry.service.duration if queue_entry.service else default_duration):
+                    earliest_barber_available_time = barber_available_time
+                    break
+                else:
+                    barber_available_time = next_appointment.appointment_time + timedelta(minutes=next_appointment.service.duration)
+            else:
+                earliest_barber_available_time = barber_available_time
+                break
+
+        if earliest_barber_available_time:
+            wait_minutes = (earliest_barber_available_time - current_time).total_seconds() / 60
+            estimated_wait_time = int(max(0, wait_minutes + cumulative_duration))
+        else:
+            estimated_wait_time = cumulative_duration
+
+    elif queue_entry.status == models.QueueStatus.IN_SERVICE:
+        estimated_wait_time = 0
+
+    queue_entry_response = schemas.QueueEntryPublicResponse(
+        id=queue_entry.id,
+        shop_id=queue_entry.shop_id,
+        position_in_queue=queue_entry.position_in_queue,
+        full_name=queue_entry.full_name,
+        status=queue_entry.status,
+        check_in_time=queue_entry.check_in_time,
+        service_start_time=queue_entry.service_start_time,
+        number_of_people=queue_entry.number_of_people,
+        barber_id=queue_entry.barber_id,
+        service_id=queue_entry.service_id,
+        estimated_wait_time=estimated_wait_time
+    )
+
+    return queue_entry_response
+
 
 @router.get("/{shop_id}", response_model=List[schemas.QueueEntryPublicResponse])
 def get_queue(
