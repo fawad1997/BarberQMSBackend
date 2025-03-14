@@ -220,3 +220,46 @@ def get_queue(
     ).order_by(models.QueueEntry.position_in_queue.asc()).all()
     
     return entries
+
+
+@router.delete("/leave", status_code=status.HTTP_200_OK)
+def leave_queue(
+    phone: str,
+    shop_id: int,
+    db: Session = Depends(get_db)
+):
+    # Validate shop exists
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Find the queue entry
+    queue_entry = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id,
+        models.QueueEntry.phone_number == phone,
+        models.QueueEntry.status == models.QueueStatus.CHECKED_IN
+    ).first()
+    
+    if not queue_entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found or already processed")
+    
+    # Store the position for updating other entries
+    position = queue_entry.position_in_queue
+    
+    # Update the status to CANCELLED
+    queue_entry.status = models.QueueStatus.CANCELLED
+    db.commit()
+    
+    # Update positions for all entries behind this one
+    entries_to_update = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id,
+        models.QueueEntry.status == models.QueueStatus.CHECKED_IN,
+        models.QueueEntry.position_in_queue > position
+    ).all()
+    
+    for entry in entries_to_update:
+        entry.position_in_queue -= 1
+    
+    db.commit()
+    
+    return {"message": "Successfully removed from queue", "queue_entry_id": queue_entry.id}
