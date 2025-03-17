@@ -19,6 +19,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
+from datetime import datetime, timedelta
 
 
 # Enums for user roles
@@ -114,6 +115,7 @@ class Shop(Base):
     advertisement_start_date = Column(DateTime, nullable=True)
     advertisement_end_date = Column(DateTime, nullable=True)
     is_advertisement_active = Column(Boolean, default=False)
+    is_open_24_hours = Column(Boolean, default=False)
 
     # Relationships
     owner = relationship("User", back_populates="shops")
