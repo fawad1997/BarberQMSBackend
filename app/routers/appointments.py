@@ -7,7 +7,7 @@ from app.database import get_db
 from datetime import datetime, timedelta
 from typing import List, Optional
 from app.core.dependencies import get_current_active_user
-from sqlalchemy import func
+from sqlalchemy import func, DateTime, Interval, cast, Text
 from app.utils.shop_utils import calculate_wait_time, format_time, is_shop_open
 from sqlalchemy.orm import joinedload
 import asyncio
@@ -82,8 +82,9 @@ async def create_appointment(
             models.Appointment.barber_id == barber.id,
             models.Appointment.status == models.AppointmentStatus.SCHEDULED,
             models.Appointment.appointment_time < appointment_end_time,
-            appointment_time < func.datetime(models.Appointment.appointment_time, 
-                                             '+' + str(service_duration) + ' minutes')
+            appointment_time < models.Appointment.appointment_time + func.cast(
+                func.concat(str(service_duration), ' minutes'), Interval
+            )
         ).all()
         
         if conflicting_appointments:
@@ -116,8 +117,9 @@ async def create_appointment(
                 models.Appointment.barber_id == barber.id,
                 models.Appointment.status == models.AppointmentStatus.SCHEDULED,
                 models.Appointment.appointment_time < appointment_end_time,
-                appointment_time < func.datetime(models.Appointment.appointment_time, 
-                                               '+' + str(service_duration) + ' minutes')
+                appointment_time < models.Appointment.appointment_time + func.cast(
+                    func.concat(str(service_duration), ' minutes'), Interval
+                )
             ).all()
             
             if not conflicting_appointments:
@@ -180,6 +182,11 @@ async def schedule_appointment_status_updates(appointment_id: int, service_durat
     # Calculate how long to wait until the appointment starts
     now = datetime.now().astimezone()
     appointment_time = appointment.appointment_time
+    
+    # Ensure appointment_time has timezone info
+    if appointment_time.tzinfo is None:
+        appointment_time = appointment_time.replace(tzinfo=now.tzinfo)
+    
     seconds_until_appointment = (appointment_time - now).total_seconds()
     
     if seconds_until_appointment > 0:
@@ -298,6 +305,11 @@ async def cancel_appointment(
     # Update queue if needed - if the appointment was about to start
     now = datetime.now().astimezone()
     appointment_time = appointment.appointment_time
+    
+    # Ensure appointment_time has timezone info
+    if appointment_time.tzinfo is None:
+        appointment_time = appointment_time.replace(tzinfo=now.tzinfo)
+    
     time_until_appointment = (appointment_time - now).total_seconds() / 60  # in minutes
     
     # If appointment was soon (within 30 minutes), update the queue
