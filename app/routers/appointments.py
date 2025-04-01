@@ -12,6 +12,7 @@ from app.utils.shop_utils import calculate_wait_time, format_time, is_shop_open
 from sqlalchemy.orm import joinedload
 import asyncio
 from app.models import BarberStatus, AppointmentStatus, QueueStatus
+from app.models import UserRole
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -527,3 +528,64 @@ async def update_appointment_status(
                             break  # Assign only to the first in queue
     
     return appointment
+
+
+@router.get("/shop/{shop_id}/appointments", response_model=List[schemas.AppointmentResponse])
+async def get_shop_appointments(
+    shop_id: int,
+    status: Optional[AppointmentStatus] = Query(None, description="Filter by appointment status"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    """
+    Get all appointments for a specific shop.
+    Can be filtered by status and date.
+    Only shop owners or authorized users can access this endpoint.
+    """
+    # Check if user is authorized to access shop data
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Check authorization - must be shop owner or admin
+    if current_user.role != UserRole.ADMIN and shop.owner_id != current_user.id:
+        barber = db.query(models.Barber).filter(
+            models.Barber.user_id == current_user.id,
+            models.Barber.shop_id == shop_id
+        ).first()
+        if not barber:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this shop's appointments"
+            )
+    
+    # Build query with efficient loading of related entities
+    query = (
+        db.query(models.Appointment)
+        .options(
+            joinedload(models.Appointment.barber),
+            joinedload(models.Appointment.service),
+            joinedload(models.Appointment.user)
+        )
+        .filter(models.Appointment.shop_id == shop_id)
+    )
+    
+    # Apply filters if provided
+    if status:
+        query = query.filter(models.Appointment.status == status)
+    
+    if date:
+        try:
+            filter_date = datetime.strptime(date, "%Y-%m-%d").date()
+            query = query.filter(func.date(models.Appointment.appointment_time) == filter_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid date format. Use YYYY-MM-DD"
+            )
+    
+    # Get appointments ordered by time
+    appointments = query.order_by(models.Appointment.appointment_time).all()
+    
+    return appointments
