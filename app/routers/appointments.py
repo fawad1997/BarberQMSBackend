@@ -540,8 +540,10 @@ async def get_shop_appointments(
 ):
     """
     Get all appointments for a specific shop.
-    Can be filtered by status and date.
-    Only shop owners or authorized users can access this endpoint.
+    - Scheduled appointments can be viewed without date restrictions
+    - Completed/cancelled appointments are limited to last 7 days
+    - Can be filtered by status and specific date
+    - Only shop owners or authorized users can access this endpoint.
     """
     # Check if user is authorized to access shop data
     shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
@@ -571,10 +573,27 @@ async def get_shop_appointments(
         .filter(models.Appointment.shop_id == shop_id)
     )
     
-    # Apply filters if provided
+    # Get current date in UTC
+    now = datetime.now().astimezone()
+    seven_days_ago = now - timedelta(days=7)
+    
+    # Apply filters based on status
     if status:
         query = query.filter(models.Appointment.status == status)
+        # For completed/cancelled appointments, add date restriction
+        if status in [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED]:
+            query = query.filter(models.Appointment.appointment_time >= seven_days_ago)
+    else:
+        # If no status specified, show all scheduled appointments but limit completed/cancelled to 7 days
+        query = query.filter(
+            (models.Appointment.status == AppointmentStatus.SCHEDULED) |
+            (
+                (models.Appointment.status.in_([AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED])) &
+                (models.Appointment.appointment_time >= seven_days_ago)
+            )
+        )
     
+    # Apply specific date filter if provided
     if date:
         try:
             filter_date = datetime.strptime(date, "%Y-%m-%d").date()
