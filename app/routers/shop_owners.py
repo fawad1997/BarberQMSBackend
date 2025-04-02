@@ -787,7 +787,7 @@ def get_queue(
                 models.QueueStatus.IN_SERVICE
             ])
         )
-        .order_by(models.QueueEntry.check_in_time)
+        .order_by(models.QueueEntry.position_in_queue)
         .all()
     )
 
@@ -1521,6 +1521,19 @@ def get_shops_dashboard(
     return response_data
 
 
+@router.put("/shops/{shop_id}/queue/", response_model=List[schemas.QueueEntryResponse])
+def reorder_queue_entries_alt(
+    shop_id: int,
+    reorder_req: schemas.QueueReorderRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """
+    Alternative endpoint for reordering queue entries that matches the frontend URL pattern.
+    """
+    return reorder_queue_entries(shop_id, reorder_req, db, current_user)
+
+# Existing reorder function with /reorder in the path
 @router.put("/shops/{shop_id}/queue/reorder", response_model=List[schemas.QueueEntryResponse])
 def reorder_queue_entries(
     shop_id: int,
@@ -1529,9 +1542,8 @@ def reorder_queue_entries(
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """
-    Reorder queue entries for a shop. For each entry, update:
-      - position_in_queue (to the new position)
-      - estimated service start time (if the customer is still waiting)
+    Reorder queue entries for a shop. This endpoint handles a single item being moved 
+    to a new position, and updates the positions of all other entries accordingly.
     
     The estimated service start time is computed as:
        current time + (new_position - 1) * (shop.average_wait_time in minutes)
@@ -1545,33 +1557,82 @@ def reorder_queue_entries(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
-    # Process each reorder item
-    for item in reorder_req.reordered_entries:
-        queue_entry = db.query(models.QueueEntry).filter(
-            models.QueueEntry.id == item.queue_id,
-            models.QueueEntry.shop_id == shop_id
-        ).first()
-        if not queue_entry:
-            raise HTTPException(status_code=404, detail=f"Queue entry {item.queue_id} not found")
+    # Get all active queue entries for the shop
+    queue_entries = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id,
+        models.QueueEntry.status.in_([
+            models.QueueStatus.CHECKED_IN,
+            models.QueueStatus.ARRIVED
+        ])
+    ).order_by(models.QueueEntry.position_in_queue).all()
+    
+    if not queue_entries:
+        raise HTTPException(status_code=404, detail="No active queue entries found")
+    
+    # Extract the moved entry from request
+    if not reorder_req.reordered_entries or len(reorder_req.reordered_entries) == 0:
+        raise HTTPException(status_code=422, detail="No reordered entries provided")
+    
+    moved_entry = reorder_req.reordered_entries[0]
+    moved_id = moved_entry.queue_id
+    new_position = moved_entry.new_position
+    
+    # Find the moved entry in the current queue
+    moved_index = next((i for i, entry in enumerate(queue_entries) if entry.id == moved_id), None)
+    if moved_index is None:
+        raise HTTPException(status_code=404, detail=f"Queue entry {moved_id} not found")
+    
+    # Validate new position
+    if new_position < 1 or new_position > len(queue_entries):
+        raise HTTPException(status_code=422, detail=f"Invalid position {new_position}")
+    
+    # Get the entry that was moved
+    entry_to_move = queue_entries.pop(moved_index)
+    
+    # Insert at the new position (adjust for 0-based index)
+    queue_entries.insert(new_position - 1, entry_to_move)
+    
+    # Update all positions in the database
+    now = datetime.utcnow()
+    
+    for new_index, entry in enumerate(queue_entries):
+        # Position is 1-based
+        entry.position_in_queue = new_index + 1
         
-        # Update the queue position
-        queue_entry.position_in_queue = item.new_position
+        # For waiting customers, update the estimated service start time
+        if entry.status == models.QueueStatus.CHECKED_IN:
+            # Calculate offset in minutes based on position
+            offset = timedelta(minutes=shop.average_wait_time * new_index)
+            entry.service_start_time = now + offset
         
-        # For waiting customers, update the estimated service start time.
-        if queue_entry.status == models.QueueStatus.CHECKED_IN:
-            now = datetime.utcnow()
-            # Calculate offset in minutes multiplied by (new_position - 1)
-            offset = timedelta(minutes=shop.average_wait_time * (item.new_position - 1))
-            queue_entry.service_start_time = now + offset
-        
-        db.add(queue_entry)
+        db.add(entry)
     
     db.commit()
     
-    # Retrieve and return updated queue entries, sorted by position
-    updated_entries = db.query(models.QueueEntry).filter(
-        models.QueueEntry.shop_id == shop_id
-    ).order_by(models.QueueEntry.position_in_queue).all()
+    # Retrieve updated queue entries with properly loaded relationships
+    updated_entries = (
+        db.query(models.QueueEntry)
+        .options(
+            joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+            joinedload(models.QueueEntry.service)
+        )
+        .filter(
+            models.QueueEntry.shop_id == shop_id,
+            models.QueueEntry.status.in_([
+                models.QueueStatus.CHECKED_IN, 
+                models.QueueStatus.ARRIVED,
+                models.QueueStatus.IN_SERVICE
+            ])
+        )
+        .order_by(models.QueueEntry.position_in_queue)
+        .all()
+    )
+    
+    # Process each entry to ensure barber full_name is available if barber exists
+    for entry in updated_entries:
+        if entry.barber and entry.barber.user:
+            # Set the full_name attribute on the barber object
+            entry.barber.full_name = entry.barber.user.full_name
     
     return updated_entries
 
