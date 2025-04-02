@@ -10,7 +10,8 @@ from app.routers import (
     appointments,
     queue,
     feedback,
-    unregistered_users
+    unregistered_users,
+    websockets
 )
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
@@ -64,6 +65,7 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
+app.include_router(websockets.router)
 
 
 @app.get("/")

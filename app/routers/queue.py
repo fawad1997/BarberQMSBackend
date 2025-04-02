@@ -1,19 +1,22 @@
 # app/routers/queue.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
 from app.models import QueueStatus
+from app.core.websockets import queue_manager
+from app.routers.websockets import get_queue_data
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
 
 
 @router.post("/", response_model=schemas.QueueEntryPublicResponse)
-def join_queue(
+async def join_queue(
     entry: schemas.QueueEntryCreatePublic,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     # Validate shop
@@ -93,6 +96,12 @@ def join_queue(
     db.add(new_entry)
     db.commit()
     db.refresh(new_entry)
+    
+    # Trigger WebSocket update in the background to avoid blocking the response
+    background_tasks.add_task(broadcast_queue_updates, entry.shop_id, db)
+    
+    # Also send a separate new entry notification
+    background_tasks.add_task(broadcast_new_entry, entry.shop_id, new_entry.id, db)
 
     return new_entry
 
@@ -183,24 +192,10 @@ def get_queue_status(
         else:
             estimated_wait_time = cumulative_duration
 
-    elif queue_entry.status == models.QueueStatus.IN_SERVICE:
-        estimated_wait_time = 0
+    # Add estimated_wait_time to queue_entry for response
+    queue_entry.estimated_wait_time = estimated_wait_time
 
-    queue_entry_response = schemas.QueueEntryPublicResponse(
-        id=queue_entry.id,
-        shop_id=queue_entry.shop_id,
-        position_in_queue=queue_entry.position_in_queue,
-        full_name=queue_entry.full_name,
-        status=queue_entry.status,
-        check_in_time=queue_entry.check_in_time,
-        service_start_time=queue_entry.service_start_time,
-        number_of_people=queue_entry.number_of_people,
-        barber_id=queue_entry.barber_id,
-        service_id=queue_entry.service_id,
-        estimated_wait_time=estimated_wait_time
-    )
-
-    return queue_entry_response
+    return queue_entry
 
 
 @router.get("/{shop_id}", response_model=List[schemas.QueueEntryPublicResponse])
@@ -223,9 +218,10 @@ def get_queue(
 
 
 @router.delete("/leave", status_code=status.HTTP_200_OK)
-def leave_queue(
+async def leave_queue(
     phone: str,
     shop_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     # Validate shop exists
@@ -262,4 +258,33 @@ def leave_queue(
     
     db.commit()
     
+    # Broadcast queue updates via WebSocket
+    background_tasks.add_task(broadcast_queue_updates, shop_id, db)
+    
     return {"message": "Successfully removed from queue", "queue_entry_id": queue_entry.id}
+
+
+# Helper functions for WebSocket broadcasts
+async def broadcast_queue_updates(shop_id: int, db: Session):
+    """Fetch and broadcast queue updates for a shop"""
+    queue_data = await get_queue_data(shop_id, db)
+    await queue_manager.broadcast_queue_update(shop_id, queue_data)
+
+async def broadcast_new_entry(shop_id: int, entry_id: int, db: Session):
+    """Broadcast a new entry notification for a specific entry"""
+    # Get the entry with barber and service relationships
+    entry = (
+        db.query(models.QueueEntry)
+        .options(
+            joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+            joinedload(models.QueueEntry.service)
+        )
+        .filter(models.QueueEntry.id == entry_id)
+        .first()
+    )
+    
+    if entry and entry.barber and entry.barber.user:
+        entry.barber.full_name = entry.barber.user.full_name
+        
+    if entry:
+        await queue_manager.broadcast_new_entry(shop_id, entry)
