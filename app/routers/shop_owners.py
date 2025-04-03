@@ -784,7 +784,8 @@ def get_queue(
             models.QueueEntry.shop_id == shop.id,
             models.QueueEntry.status.in_([
                 models.QueueStatus.CHECKED_IN,
-                models.QueueStatus.IN_SERVICE
+                models.QueueStatus.IN_SERVICE,
+                models.QueueStatus.ARRIVED
             ])
         )
         .order_by(models.QueueEntry.position_in_queue)
@@ -814,7 +815,11 @@ def update_queue_entry(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    queue_entry = db.query(models.QueueEntry).filter(
+    # Use joinedload to load the barber relationship and its user relationship
+    queue_entry = db.query(models.QueueEntry).options(
+        joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+        joinedload(models.QueueEntry.service)
+    ).filter(
         models.QueueEntry.id == queue_id,
         models.QueueEntry.shop_id == shop.id
     ).first()
@@ -830,6 +835,9 @@ def update_queue_entry(
     db.commit()
     db.refresh(queue_entry)
     
+    # Make sure barber's full_name is set if barber exists
+    if queue_entry.barber and queue_entry.barber.user:
+        queue_entry.barber.full_name = queue_entry.barber.user.full_name
     
     return queue_entry
 
