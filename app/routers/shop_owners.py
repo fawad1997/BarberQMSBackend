@@ -799,6 +799,58 @@ def get_queue(
 
     return queue_entries
 
+@router.get("/shops/{shop_id}/queue/history", response_model=List[schemas.QueueEntryResponse])
+async def get_queue_history(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Get completed and cancelled queue entries from the last 7 days"""
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Calculate date 7 days ago
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    
+    # Use joinedload to efficiently load related barber and service data
+    history_entries = (
+        db.query(models.QueueEntry)
+        .options(
+            joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+            joinedload(models.QueueEntry.service)
+        )
+        .filter(
+            models.QueueEntry.shop_id == shop.id,
+            models.QueueEntry.status.in_([
+                models.QueueStatus.COMPLETED,
+                models.QueueStatus.CANCELLED
+            ]),
+            models.QueueEntry.check_in_time >= seven_days_ago
+        )
+        .order_by(models.QueueEntry.service_end_time.desc())
+        .all()
+    )
+
+    # Transform the data to include barber and service information
+    for entry in history_entries:
+        if entry.barber:
+            entry.barber.full_name = entry.barber.user.full_name
+
+    return history_entries
+
+# Add duplicate route without trailing slash for consistent URL pattern
+@router.get("/shops/{shop_id}/queue/history/", response_model=List[schemas.QueueEntryResponse])
+async def get_queue_history_with_slash(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Duplicate route with trailing slash to ensure URL matching"""
+    return await get_queue_history(shop_id, db, current_user)
 
 @router.put("/shops/{shop_id}/queue/{queue_id}", response_model=schemas.QueueEntryResponse)
 def update_queue_entry(
@@ -826,11 +878,49 @@ def update_queue_entry(
     if not queue_entry:
         raise HTTPException(status_code=404, detail="Queue entry not found")
 
+    # Store the original status to check for changes
+    original_status = queue_entry.status
+    
+    # Update the status
     queue_entry.status = status_update.status
+    
+    # Set timestamps based on status changes
     if queue_entry.status == models.QueueStatus.IN_SERVICE:
         queue_entry.service_start_time = datetime.utcnow()
     elif queue_entry.status == models.QueueStatus.COMPLETED:
         queue_entry.service_end_time = datetime.utcnow()
+    
+    # Handle reordering when status is changed to COMPLETED or CANCELLED
+    if queue_entry.status in [models.QueueStatus.COMPLETED, models.QueueStatus.CANCELLED] and original_status not in [models.QueueStatus.COMPLETED, models.QueueStatus.CANCELLED]:
+        # Set position to 0 for the completed/cancelled entry
+        queue_entry.position_in_queue = 0
+        
+        # Get all active queue entries for the shop to reorder them
+        active_entries = db.query(models.QueueEntry).filter(
+            models.QueueEntry.shop_id == shop_id,
+            models.QueueEntry.id != queue_id,  # Exclude the current entry
+            models.QueueEntry.status.in_([
+                models.QueueStatus.CHECKED_IN,
+                models.QueueStatus.ARRIVED,
+                models.QueueStatus.IN_SERVICE
+            ])
+        ).order_by(models.QueueEntry.position_in_queue).all()
+        
+        # Update positions for all remaining active entries
+        now = datetime.utcnow()
+        for new_index, entry in enumerate(active_entries):
+            # Position is 1-based
+            entry.position_in_queue = new_index + 1
+            
+            # Update estimated service start time for waiting customers
+            if entry.status == models.QueueStatus.CHECKED_IN:
+                # Calculate offset in minutes based on position
+                offset = timedelta(minutes=shop.average_wait_time * new_index)
+                entry.estimated_service_time = now + offset
+            
+            db.add(entry)
+    
+    # Save the updated entry
     db.add(queue_entry)
     db.commit()
     db.refresh(queue_entry)
