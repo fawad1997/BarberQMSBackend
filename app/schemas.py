@@ -332,6 +332,9 @@ class TokenWithUserDetails(Token):
 class QueueStatusUpdate(BaseModel):
     status: QueueStatus
 
+class QueueBarberUpdate(BaseModel):
+    barber_id: int
+
 class QueueEntryBase(BaseModel):
     shop_id: int
     user_id: Optional[int] = None

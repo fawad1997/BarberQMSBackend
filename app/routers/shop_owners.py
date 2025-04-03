@@ -942,6 +942,74 @@ def update_queue_entry(
     
     return queue_entry
 
+@router.put("/shops/{shop_id}/queue/{queue_id}/barber", response_model=schemas.QueueEntryResponse)
+def update_queue_entry_barber(
+    shop_id: int,
+    queue_id: int,
+    barber_update: schemas.QueueBarberUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Update the barber assigned to a queue entry"""
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Find the queue entry
+    queue_entry = db.query(models.QueueEntry).options(
+        joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+        joinedload(models.QueueEntry.service)
+    ).filter(
+        models.QueueEntry.id == queue_id,
+        models.QueueEntry.shop_id == shop.id
+    ).first()
+    if not queue_entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
+    
+    # Check if queue entry is in a state where barber can be changed
+    if queue_entry.status not in [models.QueueStatus.CHECKED_IN, models.QueueStatus.ARRIVED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot change barber when queue entry is in {queue_entry.status.value} status"
+        )
+    
+    # Verify the new barber exists and belongs to this shop
+    barber = db.query(models.Barber).options(
+        joinedload(models.Barber.user)
+    ).filter(
+        models.Barber.id == barber_update.barber_id,
+        models.Barber.shop_id == shop.id
+    ).first()
+    if not barber:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Barber not found or doesn't belong to this shop"
+        )
+    
+    # Check if barber is active
+    if not barber.user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot assign inactive barber"
+        )
+    
+    # Update the barber assignment
+    queue_entry.barber_id = barber.id
+    
+    # Save changes
+    db.add(queue_entry)
+    db.commit()
+    db.refresh(queue_entry)
+    
+    # Set barber's full name for the response
+    if queue_entry.barber and queue_entry.barber.user:
+        queue_entry.barber.full_name = queue_entry.barber.user.full_name
+    
+    return queue_entry
 
 @router.get("/shops/{shop_id}/appointments/", response_model=List[schemas.AppointmentResponse])
 def get_shop_appointments(
