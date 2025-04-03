@@ -10,14 +10,16 @@ from app.routers import (
     appointments,
     queue,
     feedback,
-    unregistered_users,
-    websockets
+    unregistered_users
 )
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
 import uvicorn
 from dotenv import load_dotenv
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Barbershop Queue System API",
@@ -35,6 +37,7 @@ load_dotenv()
 origins = [
     "http://localhost:8080",
     "http://localhost:8000",
+    "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
     "*"
@@ -50,10 +53,37 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# Add middleware to handle WebSocket CORS
+@app.middleware("http")
+async def process_ws_cors(request: Request, call_next):
+    """Middleware to handle WebSocket CORS headers"""
+    # Check if it's a WebSocket upgrade request
+    if request.headers.get("upgrade", "").lower() == "websocket":
+        logger.debug(f"WebSocket upgrade request to: {request.url.path}")
+        
+        # Process the request
+        response = await call_next(request)
+        
+        # Set required CORS headers for WebSockets
+        if "*" in origins:
+            # If wildcard is allowed, use the Origin header or fall back to *
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+        elif request.headers.get("origin") in origins:
+            # If the origin is in our allowed list, echo it back
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin")
+            
+        # Allow credentials (important for authenticated WebSockets)
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+        
+    return await call_next(request)
+
 # database initialization
 @app.on_event("startup")
 def on_startup():
     init_db()
+    logger.info("Database initialized")
+    logger.info(f"WebSocket routes available at: {[route.path for route in app.routes if str(route.path).startswith('/ws/')]}")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
@@ -65,7 +95,6 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
-app.include_router(websockets.router)
 
 
 @app.get("/")

@@ -14,7 +14,6 @@ import logging
 import aiofiles
 import os
 import uuid
-from app.core.websockets import queue_manager
 
 router = APIRouter(prefix="/shop-owners", tags=["Shop Owners"])
 
@@ -801,7 +800,7 @@ def get_queue(
 
 
 @router.put("/shops/{shop_id}/queue/{queue_id}", response_model=schemas.QueueEntryResponse)
-async def update_queue_entry(
+def update_queue_entry(
     shop_id: int,
     queue_id: int,
     status_update: schemas.QueueStatusUpdate,
@@ -831,32 +830,6 @@ async def update_queue_entry(
     db.commit()
     db.refresh(queue_entry)
     
-    # Get updated queue data to broadcast via WebSocket
-    updated_entries = (
-        db.query(models.QueueEntry)
-        .options(
-            joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
-            joinedload(models.QueueEntry.service)
-        )
-        .filter(
-            models.QueueEntry.shop_id == shop_id,
-            models.QueueEntry.status.in_([
-                models.QueueStatus.CHECKED_IN, 
-                models.QueueStatus.ARRIVED,
-                models.QueueStatus.IN_SERVICE
-            ])
-        )
-        .order_by(models.QueueEntry.position_in_queue)
-        .all()
-    )
-    
-    # Process each entry to ensure barber full_name is available if barber exists
-    for entry in updated_entries:
-        if entry.barber and entry.barber.user:
-            entry.barber.full_name = entry.barber.user.full_name
-    
-    # Directly await the broadcast
-    await queue_manager.broadcast_queue_update(shop_id, updated_entries)
     
     return queue_entry
 
@@ -1551,7 +1524,7 @@ def get_shops_dashboard(
 
 
 @router.put("/shops/{shop_id}/queue/", response_model=List[schemas.QueueEntryResponse])
-async def reorder_queue_entries_alt(
+def reorder_queue_entries_alt(
     shop_id: int,
     reorder_req: schemas.QueueReorderRequest,
     db: Session = Depends(get_db),
@@ -1560,11 +1533,11 @@ async def reorder_queue_entries_alt(
     """
     Alternative endpoint for reordering queue entries that matches the frontend URL pattern.
     """
-    return await reorder_queue_entries(shop_id, reorder_req, db, current_user)
+    return reorder_queue_entries(shop_id, reorder_req, db, current_user)
 
 # Existing reorder function with /reorder in the path
 @router.put("/shops/{shop_id}/queue/reorder", response_model=List[schemas.QueueEntryResponse])
-async def reorder_queue_entries(
+def reorder_queue_entries(
     shop_id: int,
     reorder_req: schemas.QueueReorderRequest,
     db: Session = Depends(get_db),
@@ -1662,9 +1635,6 @@ async def reorder_queue_entries(
         if entry.barber and entry.barber.user:
             # Set the full_name attribute on the barber object
             entry.barber.full_name = entry.barber.user.full_name
-    
-    # Directly await the broadcast
-    await queue_manager.broadcast_queue_update(shop_id, updated_entries)
     
     return updated_entries
 

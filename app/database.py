@@ -17,7 +17,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def get_engine(retries=5, delay=2):
     for i in range(retries):
         try:
-            engine = create_engine(DATABASE_URL)
+            engine = create_engine(
+                DATABASE_URL, 
+                pool_size=20,              # Increased from default 5
+                max_overflow=20,           # Increased from default 10
+                pool_timeout=60,           # Increased from default 30
+                pool_recycle=3600,         # Connection recycle time (1 hour)
+                pool_pre_ping=True,        # Check connection validity before usage
+            )
             engine.connect()
             return engine
         except OperationalError:

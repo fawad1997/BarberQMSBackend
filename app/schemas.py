@@ -467,24 +467,3 @@ class QueueReorderItem(BaseModel):
 
 class QueueReorderRequest(BaseModel):
     reordered_entries: List[QueueReorderItem]
-
-# WebSocket message schemas
-class WebSocketMessageType(str, Enum):
-    QUEUE_UPDATE = "queue_update"
-    NEW_ENTRY = "new_entry"
-    APPOINTMENT_UPDATE = "appointment_update"
-
-class WebSocketMessage(BaseModel):
-    type: WebSocketMessageType
-
-class QueueUpdateMessage(WebSocketMessage):
-    type: WebSocketMessageType = WebSocketMessageType.QUEUE_UPDATE
-    queue_items: List[QueueEntryResponse]
-
-class NewEntryMessage(WebSocketMessage):
-    type: WebSocketMessageType = WebSocketMessageType.NEW_ENTRY
-    queue_item: QueueEntryResponse
-
-class AppointmentUpdateMessage(WebSocketMessage):
-    type: WebSocketMessageType = WebSocketMessageType.APPOINTMENT_UPDATE
-    appointments: List[AppointmentResponse]
