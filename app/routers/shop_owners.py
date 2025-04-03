@@ -569,15 +569,19 @@ def get_barbers(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    # Join with User table to get all required information
+    # Join with User table and load services relationship
     barbers = (
         db.query(models.Barber)
         .join(models.User)
+        .options(
+            joinedload(models.Barber.user),
+            joinedload(models.Barber.services)
+        )
         .filter(models.Barber.shop_id == shop.id)
         .all()
     )
 
-    # Create response objects with combined barber and user information
+    # Create response objects with combined barber, user information, and services
     barber_responses = []
     for barber in barbers:
         response_dict = {
@@ -588,7 +592,14 @@ def get_barbers(
             "full_name": barber.user.full_name,
             "email": barber.user.email,
             "phone_number": barber.user.phone_number,
-            "is_active": barber.user.is_active
+            "is_active": barber.user.is_active,
+            "services": [{
+                "id": service.id,
+                "name": service.name,
+                "duration": service.duration,
+                "price": service.price,
+                "shop_id": service.shop_id
+            } for service in barber.services]
         }
         barber_responses.append(response_dict)
 
