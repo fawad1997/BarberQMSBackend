@@ -1011,6 +1011,66 @@ def update_queue_entry_barber(
     
     return queue_entry
 
+@router.put("/shops/{shop_id}/queue/{queue_id}/service", response_model=schemas.QueueEntryResponse)
+def update_queue_entry_service(
+    shop_id: int,
+    queue_id: int,
+    service_update: schemas.QueueServiceUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Update the service assigned to a queue entry"""
+    # Verify shop ownership
+    shop = db.query(models.Shop).filter(
+        models.Shop.id == shop_id,
+        models.Shop.owner_id == current_user.id
+    ).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Find the queue entry
+    queue_entry = db.query(models.QueueEntry).options(
+        joinedload(models.QueueEntry.barber).joinedload(models.Barber.user),
+        joinedload(models.QueueEntry.service)
+    ).filter(
+        models.QueueEntry.id == queue_id,
+        models.QueueEntry.shop_id == shop.id
+    ).first()
+    if not queue_entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
+    
+    # Check if queue entry is in a state where service can be changed
+    if queue_entry.status not in [models.QueueStatus.CHECKED_IN, models.QueueStatus.ARRIVED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot change service when queue entry is in {queue_entry.status.value} status"
+        )
+    
+    # Verify the new service exists and belongs to this shop
+    service = db.query(models.Service).filter(
+        models.Service.id == service_update.service_id,
+        models.Service.shop_id == shop.id
+    ).first()
+    if not service:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service not found or doesn't belong to this shop"
+        )
+    
+    # Update the service assignment
+    queue_entry.service_id = service.id
+    
+    # Save changes
+    db.add(queue_entry)
+    db.commit()
+    db.refresh(queue_entry)
+    
+    # Ensure barber's full name is set if barber exists
+    if queue_entry.barber and queue_entry.barber.user:
+        queue_entry.barber.full_name = queue_entry.barber.user.full_name
+    
+    return queue_entry
+
 @router.get("/shops/{shop_id}/appointments/", response_model=List[schemas.AppointmentResponse])
 def get_shop_appointments(
     shop_id: int,

@@ -335,6 +335,9 @@ class QueueStatusUpdate(BaseModel):
 class QueueBarberUpdate(BaseModel):
     barber_id: int
 
+class QueueServiceUpdate(BaseModel):
+    service_id: int
+
 class QueueEntryBase(BaseModel):
     shop_id: int
     user_id: Optional[int] = None
