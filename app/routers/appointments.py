@@ -16,7 +16,7 @@ from app.models import UserRole
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
-@router.post("/", response_model=schemas.AppointmentResponse)
+@router.post("/", response_model=schemas.DetailedAppointmentResponse)
 async def create_appointment(
     background_tasks: BackgroundTasks,
     appointment_in: schemas.AppointmentCreate,
@@ -165,6 +165,25 @@ async def create_appointment(
         service_duration=service_duration
     )
     
+    # Load related entities for response
+    new_appointment = (
+        db.query(models.Appointment)
+        .options(
+            joinedload(models.Appointment.barber).joinedload(models.Barber.user),
+            joinedload(models.Appointment.service),
+            joinedload(models.Appointment.user)
+        )
+        .filter(models.Appointment.id == new_appointment.id)
+        .first()
+    )
+    
+    # Prepare response with nested objects for barber and service
+    if new_appointment.barber:
+        # Ensure user data is available
+        new_appointment.barber.full_name = new_appointment.barber.user.full_name
+        new_appointment.barber.email = new_appointment.barber.user.email
+        new_appointment.barber.phone_number = new_appointment.barber.user.phone_number
+    
     return new_appointment
 
 
@@ -254,14 +273,30 @@ async def schedule_appointment_status_updates(appointment_id: int, service_durat
     db.commit()
 
 
-@router.get("/me", response_model=List[schemas.AppointmentResponse])
+@router.get("/me", response_model=List[schemas.DetailedAppointmentResponse])
 def get_my_appointments(
     phone_number: str = Query(..., description="Phone number to fetch appointments for"),
     db: Session = Depends(get_db)
 ):
-    appointments = db.query(models.Appointment).filter(
-        models.Appointment.phone_number == phone_number
-    ).all()
+    appointments = (
+        db.query(models.Appointment)
+        .options(
+            joinedload(models.Appointment.barber).joinedload(models.Barber.user),
+            joinedload(models.Appointment.service),
+            joinedload(models.Appointment.user)
+        )
+        .filter(models.Appointment.phone_number == phone_number)
+        .all()
+    )
+    
+    # Prepare response with nested objects for barber and service
+    for appointment in appointments:
+        if appointment.barber:
+            # Ensure user data is available
+            appointment.barber.full_name = appointment.barber.user.full_name
+            appointment.barber.email = appointment.barber.user.email
+            appointment.barber.phone_number = appointment.barber.user.phone_number
+    
     return appointments
 
 
@@ -452,7 +487,7 @@ async def get_shop_details(
     return shop
 
 
-@router.patch("/{appointment_id}/status", response_model=schemas.AppointmentResponse)
+@router.patch("/{appointment_id}/status", response_model=schemas.DetailedAppointmentResponse)
 async def update_appointment_status(
     appointment_id: int,
     status_update: schemas.AppointmentStatusUpdate,
@@ -462,7 +497,17 @@ async def update_appointment_status(
     Update appointment status manually. This allows shop owners or barbers
     to mark appointments as completed or cancelled.
     """
-    appointment = db.query(models.Appointment).filter(models.Appointment.id == appointment_id).first()
+    appointment = (
+        db.query(models.Appointment)
+        .options(
+            joinedload(models.Appointment.barber).joinedload(models.Barber.user),
+            joinedload(models.Appointment.service),
+            joinedload(models.Appointment.user)
+        )
+        .filter(models.Appointment.id == appointment_id)
+        .first()
+    )
+    
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
@@ -527,10 +572,17 @@ async def update_appointment_status(
                             db.commit()
                             break  # Assign only to the first in queue
     
+    # Prepare response with nested objects for barber and service
+    if appointment.barber:
+        # Ensure user data is available
+        appointment.barber.full_name = appointment.barber.user.full_name
+        appointment.barber.email = appointment.barber.user.email
+        appointment.barber.phone_number = appointment.barber.user.phone_number
+    
     return appointment
 
 
-@router.get("/shop/{shop_id}/appointments", response_model=List[schemas.AppointmentResponse])
+@router.get("/shop/{shop_id}/appointments", response_model=List[schemas.DetailedAppointmentResponse])
 async def get_shop_appointments(
     shop_id: int,
     status: Optional[AppointmentStatus] = Query(None, description="Filter by appointment status"),
@@ -566,7 +618,7 @@ async def get_shop_appointments(
     query = (
         db.query(models.Appointment)
         .options(
-            joinedload(models.Appointment.barber),
+            joinedload(models.Appointment.barber).joinedload(models.Barber.user),
             joinedload(models.Appointment.service),
             joinedload(models.Appointment.user)
         )
@@ -606,5 +658,13 @@ async def get_shop_appointments(
     
     # Get appointments ordered by time
     appointments = query.order_by(models.Appointment.appointment_time).all()
+    
+    # Prepare response with nested objects for barber and service
+    for appointment in appointments:
+        if appointment.barber:
+            # Ensure user data is available
+            appointment.barber.full_name = appointment.barber.user.full_name
+            appointment.barber.email = appointment.barber.user.email
+            appointment.barber.phone_number = appointment.barber.user.phone_number
     
     return appointments

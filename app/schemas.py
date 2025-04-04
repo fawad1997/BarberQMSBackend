@@ -109,11 +109,17 @@ class AppointmentResponse(AppointmentBase):
     id: int
     status: AppointmentStatus
     created_at: datetime
+    actual_start_time: Optional[datetime] = None
+    actual_end_time: Optional[datetime] = None
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
 
     # Add validator for created_at
-    @field_validator('created_at')
+    @field_validator('created_at', 'actual_start_time', 'actual_end_time')
     def validate_created_at(cls, v):
-        return validate_timezone(v)
+        if v is not None:
+            return validate_timezone(v)
+        return v
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -358,9 +364,11 @@ class ServiceInfo(BaseModel):
 
 class BarberInfo(BaseModel):
     id: int
-    full_name: str
     status: BarberStatus
-
+    full_name: str
+    phone_number: Optional[str] = None
+    email: Optional[str] = None
+    
     model_config = ConfigDict(from_attributes=True)
 
 class QueueEntryResponse(QueueEntryBase):
@@ -473,3 +481,9 @@ class QueueReorderItem(BaseModel):
 
 class QueueReorderRequest(BaseModel):
     reordered_entries: List[QueueReorderItem]
+
+class DetailedAppointmentResponse(AppointmentResponse):
+    barber: Optional[BarberInfo] = None
+    service: Optional[ServiceInfo] = None
+    
+    model_config = ConfigDict(from_attributes=True)
