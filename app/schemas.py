@@ -487,3 +487,29 @@ class DetailedAppointmentResponse(AppointmentResponse):
     service: Optional[ServiceInfo] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+class DisplayQueueItem(BaseModel):
+    id: int
+    shop_id: int
+    shop_name: str
+    display_id: str  # W1, A2, etc.
+    name: str
+    type: str  # "Walk-in" or "Appointment"
+    service: str
+    position: int  # Original position (in walk-ins or appointments)
+    calculated_position: int  # Overall position in combined queue
+    estimated_duration: int  # in minutes
+    estimated_time: Optional[datetime] = None
+    number_of_people: int = 1
+
+    @field_validator('estimated_time')
+    def validate_estimated_time(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
+
+class SimplifiedQueueResponse(BaseModel):
+    shop_id: int
+    shop_name: str
+    current_time: str
+    queue: List[dict] = []

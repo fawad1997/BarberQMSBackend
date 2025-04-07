@@ -2,11 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Dict, Any
 from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
-from app.models import QueueStatus
+from app.models import QueueStatus, AppointmentStatus
+from app.schemas import convert_to_pacific
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
 
@@ -265,3 +266,202 @@ def leave_queue(
     
     
     return {"message": "Successfully removed from queue", "queue_entry_id": queue_entry.id}
+
+
+@router.get("/display/{shop_id}", response_model=schemas.SimplifiedQueueResponse)
+async def get_display_queue(
+    shop_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get combined queue display for customer screen showing both appointments and walk-ins
+    in chronological sequence with accurate position numbers.
+    """
+    # Validate shop exists
+    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    current_time = datetime.utcnow()
+    
+    # Calculate today's date range in UTC
+    today_start = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    
+    # Get active walk-ins in queue
+    walk_ins = db.query(models.QueueEntry).filter(
+        models.QueueEntry.shop_id == shop_id,
+        models.QueueEntry.status.in_([QueueStatus.CHECKED_IN, QueueStatus.ARRIVED])
+    ).order_by(models.QueueEntry.position_in_queue.asc()).all()
+    
+    # Get upcoming appointments (for today only - this seems to be the desired behavior)
+    appointments = db.query(models.Appointment).filter(
+        models.Appointment.shop_id == shop_id,
+        models.Appointment.status == AppointmentStatus.SCHEDULED,
+        models.Appointment.appointment_time >= current_time,
+        models.Appointment.appointment_time < today_end
+    ).order_by(models.Appointment.appointment_time.asc()).all()
+    
+    # Calculate default service duration from shop
+    default_duration = shop.average_wait_time or 20  # fallback to 20 minutes
+    
+    # Process walk-ins first
+    display_queue = []
+    for entry in walk_ins:
+        # Get service details
+        service_duration = default_duration
+        service_name = "Haircut"  # Default name
+        if entry.service_id:
+            service = db.query(models.Service).filter(models.Service.id == entry.service_id).first()
+            if service:
+                service_duration = service.duration
+                service_name = service.name
+        
+        # Calculate estimated service time
+        estimated_service_time = None
+        if entry.barber_id:
+            barber = db.query(models.Barber).filter(models.Barber.id == entry.barber_id).first()
+            if barber and barber.status == models.BarberStatus.AVAILABLE:
+                estimated_service_time = current_time
+            else:
+                # Check if the barber has an ongoing service
+                ongoing_service = db.query(models.QueueEntry).filter(
+                    models.QueueEntry.barber_id == entry.barber_id,
+                    models.QueueEntry.status == QueueStatus.IN_SERVICE
+                ).first()
+                
+                if ongoing_service and ongoing_service.service_end_time:
+                    estimated_service_time = ongoing_service.service_end_time
+        
+        # Add simplified entry to display queue
+        display_queue.append({
+            "name": entry.full_name,
+            "type": "Walk-in",
+            "service": service_name,
+            "position": entry.position_in_queue,
+            "estimated_duration": service_duration,
+            "number_of_people": entry.number_of_people
+        })
+    
+    # Process appointments
+    appointment_position = 1
+    for appt in appointments:
+        # Calculate estimated service time based on appointment time
+        service_duration = default_duration
+        service_name = "Haircut"  # Default name
+        
+        if appt.service_id:
+            service = db.query(models.Service).filter(models.Service.id == appt.service_id).first()
+            if service:
+                service_duration = service.duration
+                service_name = service.name
+        
+        # Convert to Pacific time for display
+        appt_time_pacific = convert_to_pacific(appt.appointment_time) if appt.appointment_time else None
+        
+        # Format appointment time
+        formatted_time = appt_time_pacific.strftime("%I:%M %p") if appt_time_pacific else None
+        
+        # Add simplified appointment to display queue
+        display_queue.append({
+            "name": appt.full_name or f"Appointment #{appointment_position}",
+            "type": "Appointment",
+            "service": service_name,
+            "position": appointment_position,
+            "estimated_duration": service_duration,
+            "number_of_people": appt.number_of_people,
+            "appointment_time": formatted_time,
+            "appointment_date": appt_time_pacific.strftime("%Y-%m-%d") if appt_time_pacific else None
+        })
+        appointment_position += 1
+    
+    # Sort combined queue by estimated service time
+    # For walk-ins without estimated time, use their position to maintain order
+    def get_sort_time(item):
+        if "estimated_time" in item and item["estimated_time"] is not None:
+            return item["estimated_time"]
+        # For appointments, use appointment time as sorting key
+        if item["type"] == "Appointment" and "appointment_time" in item:
+            # Parse the appointment time and convert to datetime for sorting
+            try:
+                if appt.appointment_time:  # Use the actual datetime object from above
+                    return appt.appointment_time
+            except:
+                pass
+        # For walk-ins without estimated time, create a synthetic time based on position
+        return current_time + timedelta(minutes=item["position"] * 15)
+    
+    # Sort the queue by estimated time
+    display_queue = sorted(display_queue, key=get_sort_time)
+    
+    # Recalculate the overall positions
+    for i, item in enumerate(display_queue):
+        item["calculated_position"] = i + 1
+    
+    # Convert current time to Pacific timezone for display
+    display_current_time = convert_to_pacific(current_time)
+    
+    # Build the simplified response
+    response = {
+        "shop_id": shop_id,
+        "shop_name": shop.name,
+        "current_time": display_current_time.strftime("%I:%M %p"),
+        "queue": display_queue
+    }
+    
+    return response
+
+
+# Add a debug endpoint to see all appointments
+@router.get("/debug/appointments/{shop_id}", response_model=List[Dict[str, Any]])
+async def debug_appointments(
+    shop_id: int,
+    db: Session = Depends(get_db)
+):
+    """Debug endpoint to check all appointments for a shop."""
+    # Get all appointments for this shop
+    appointments = db.query(models.Appointment).filter(
+        models.Appointment.shop_id == shop_id
+    ).all()
+    
+    result = []
+    current_time = datetime.utcnow()
+    
+    for appt in appointments:
+        # Convert appointment time to Pacific timezone for display
+        appt_time_pacific = convert_to_pacific(appt.appointment_time) if appt.appointment_time else None
+        
+        # Format appointment time
+        formatted_time = appt_time_pacific.strftime("%I:%M %p") if appt_time_pacific else None
+        formatted_date = appt_time_pacific.strftime("%Y-%m-%d") if appt_time_pacific else None
+        
+        # Calculate if this appointment should be visible in the display queue
+        would_show = (
+            appt.status == AppointmentStatus.SCHEDULED and 
+            appt.appointment_time >= current_time
+        )
+        
+        # Get service name
+        service_name = "Unknown"
+        if appt.service_id:
+            service = db.query(models.Service).filter(models.Service.id == appt.service_id).first()
+            if service:
+                service_name = service.name
+        
+        result.append({
+            "id": appt.id,
+            "full_name": appt.full_name,
+            "status": str(appt.status),
+            "appointment_time_utc": str(appt.appointment_time) if appt.appointment_time else None,
+            "appointment_time": formatted_time,
+            "appointment_date": formatted_date,
+            "service": service_name,
+            "would_show_in_queue": would_show,
+            "reason_if_not_showing": None if would_show else (
+                "Status not SCHEDULED" if appt.status != AppointmentStatus.SCHEDULED else
+                "Appointment time in past" if appt.appointment_time < current_time else
+                "Unknown reason"
+            )
+        })
+    
+    return result
