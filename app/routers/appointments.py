@@ -13,6 +13,8 @@ from sqlalchemy.orm import joinedload
 import asyncio
 from app.models import BarberStatus, AppointmentStatus, QueueStatus
 from app.models import UserRole
+from app.websockets.utils import broadcast_queue_update
+from app.websockets.manager import manager
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -184,6 +186,9 @@ async def create_appointment(
         new_appointment.barber.email = new_appointment.barber.user.email
         new_appointment.barber.phone_number = new_appointment.barber.user.phone_number
     
+    # Broadcast queue update via WebSocket
+    asyncio.create_task(broadcast_queue_update(db, appointment_in.shop_id, manager))
+    
     return new_appointment
 
 
@@ -226,6 +231,9 @@ async def schedule_appointment_status_updates(appointment_id: int, service_durat
         barber.status = models.BarberStatus.IN_SERVICE
         appointment.actual_start_time = datetime.now().astimezone()
         db.commit()
+        
+        # Broadcast queue update when appointment starts
+        asyncio.create_task(broadcast_queue_update(db, appointment.shop_id, manager))
     
     # Wait for service duration
     await asyncio.sleep(service_duration * 60)
@@ -271,6 +279,9 @@ async def schedule_appointment_status_updates(appointment_id: int, service_durat
                     entry.barber_id = barber.id
     
     db.commit()
+    
+    # Broadcast queue update when appointment completes
+    asyncio.create_task(broadcast_queue_update(db, appointment.shop_id, manager))
 
 
 @router.get("/me", response_model=List[schemas.DetailedAppointmentResponse])
@@ -389,7 +400,8 @@ async def cancel_appointment(
                         next_in_queue.barber_id = barber.id
                         db.commit()
     
-    return
+    # Broadcast queue update via WebSocket
+    asyncio.create_task(broadcast_queue_update(db, appointment.shop_id, manager))
 
 
 @router.get("/shops", response_model=schemas.ShopListResponse)
@@ -571,6 +583,9 @@ async def update_appointment_status(
                             entry.barber_id = barber.id
                             db.commit()
                             break  # Assign only to the first in queue
+    
+    # Broadcast queue update via WebSocket
+    asyncio.create_task(broadcast_queue_update(db, appointment.shop_id, manager))
     
     # Prepare response with nested objects for barber and service
     if appointment.barber:

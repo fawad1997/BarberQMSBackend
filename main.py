@@ -12,12 +12,14 @@ from app.routers import (
     feedback,
     unregistered_users
 )
+from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
 import uvicorn
 from dotenv import load_dotenv
 import os
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,14 @@ async def process_ws_cors(request: Request, call_next):
         
     return await call_next(request)
 
+# Start the queue refresh background task
+@app.on_event("startup")
+async def start_queue_refresh_task():
+    """Start the background task for queue refreshes on startup"""
+    from app.websockets.tasks import periodic_queue_refresh
+    asyncio.create_task(periodic_queue_refresh())
+    logger.info("Queue refresh background task started")
+
 # database initialization
 @app.on_event("startup")
 def on_startup():
@@ -95,6 +105,7 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
+app.include_router(websocket_router)  # Include WebSocket router
 
 
 @app.get("/")
