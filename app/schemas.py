@@ -513,3 +513,22 @@ class SimplifiedQueueResponse(BaseModel):
     shop_name: str
     current_time: str
     queue: List[dict] = []
+
+class AppointmentUpdate(BaseModel):
+    appointment_time: Optional[datetime] = None
+    #barber_id: Optional[int] = None
+    #service_id: Optional[int] = None
+    number_of_people: Optional[int] = Field(default=None, ge=1)
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+
+    @field_validator('appointment_time')
+    def validate_appointment_time(cls, v):
+        if v:
+            return validate_timezone(v)
+        return v
+
+    @field_validator('full_name', 'phone_number')
+    def validate_guest_fields(cls, v, info):
+        # Allow updating individual fields
+        return v
