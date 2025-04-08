@@ -147,11 +147,11 @@ async def create_appointment(
     new_appointment = models.Appointment(
         shop_id=appointment_in.shop_id,
         barber_id=selected_barber_id,
-        service_id=appointment_in.service_id,
+        #service_id=appointment_in.service_id,
         appointment_time=appointment_time,
         status=models.AppointmentStatus.SCHEDULED,
         number_of_people=appointment_in.number_of_people,
-        user_id=appointment_in.user_id,
+        #user_id=appointment_in.user_id,
         full_name=appointment_in.full_name,
         phone_number=appointment_in.phone_number
     )
@@ -683,3 +683,147 @@ async def get_shop_appointments(
             appointment.barber.phone_number = appointment.barber.user.phone_number
     
     return appointments
+
+
+@router.put("/{appointment_id}", response_model=schemas.DetailedAppointmentResponse)
+async def update_appointment(
+    appointment_id: int,
+    appointment_update: schemas.AppointmentUpdate,
+    phone_number: str = Query(..., description="Phone number associated with the appointment"),
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing appointment.
+    - Can only update scheduled appointments
+    - Cannot update appointments that are in progress or completed
+    - Must provide phone number for verification
+    - Can update: appointment time, barber, service, number of people, full name, and phone number
+    """
+    # Find the appointment with validation
+    appointment = db.query(models.Appointment).filter(
+        models.Appointment.id == appointment_id,
+        models.Appointment.phone_number == phone_number
+    ).first()
+    
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    if appointment.status != models.AppointmentStatus.SCHEDULED:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot modify an appointment that is not in scheduled status"
+        )
+
+    # Check if appointment is within allowed modification window (e.g., not too close to start time)
+    now = datetime.now().astimezone()
+    if appointment.appointment_time.astimezone() - now < timedelta(hours=1):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot modify appointments less than 1 hour before start time"
+        )
+
+    # Check if the shop exists
+    shop = db.query(models.Shop).filter(models.Shop.id == appointment.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # If updating appointment time
+    if appointment_update.appointment_time:
+        appointment_time = appointment_update.appointment_time
+        weekday = appointment_time.weekday()
+        day_of_week = (weekday + 1) % 7
+        appt_time = appointment_time.time()
+        
+        # Skip time validation for 24-hour shops
+        is_24_hour_shop = shop.opening_time == shop.closing_time
+        if not is_24_hour_shop and not (shop.opening_time <= appt_time <= shop.closing_time):
+            raise HTTPException(status_code=400, detail="Appointment time is outside shop operating hours")
+
+        # Get service duration
+        service_duration = 30  # Default duration
+        service_id = appointment_update.service_id or appointment.service_id
+        if service_id:
+            service = db.query(models.Service).filter(
+                models.Service.id == service_id,
+                models.Service.shop_id == appointment.shop_id
+            ).first()
+            if service:
+                service_duration = service.duration
+
+        appointment_end_time = appointment_time + timedelta(minutes=service_duration)
+
+        # If barber is specified or keeping existing barber
+        barber_id = appointment_update.barber_id or appointment.barber_id
+        if barber_id:
+            barber = db.query(models.Barber).filter(
+                models.Barber.id == barber_id,
+                models.Barber.shop_id == appointment.shop_id
+            ).first()
+            
+            if not barber:
+                raise HTTPException(status_code=404, detail="Barber not found")
+            
+            # Check barber schedule
+            schedule = db.query(models.BarberSchedule).filter(
+                models.BarberSchedule.barber_id == barber.id,
+                models.BarberSchedule.day_of_week == day_of_week
+            ).first()
+            
+            if not schedule:
+                raise HTTPException(status_code=400, detail="Barber is not scheduled to work on this day")
+            
+            if not (schedule.start_time <= appt_time <= schedule.end_time):
+                raise HTTPException(status_code=400, detail="Appointment time is outside barber's working hours")
+            
+            # Check for conflicting appointments (excluding current appointment)
+            conflicting_appointments = db.query(models.Appointment).filter(
+                models.Appointment.barber_id == barber.id,
+                models.Appointment.status == models.AppointmentStatus.SCHEDULED,
+                models.Appointment.id != appointment_id,
+                models.Appointment.appointment_time < appointment_end_time,
+                appointment_time < models.Appointment.appointment_time + func.cast(
+                    func.concat(str(service_duration), ' minutes'), Interval
+                )
+            ).all()
+            
+            if conflicting_appointments:
+                raise HTTPException(status_code=400, detail="Barber has conflicting appointments")
+
+        # Update appointment fields
+        appointment.appointment_time = appointment_time
+
+    # Update other fields if provided
+    if appointment_update.barber_id is not None:
+        appointment.barber_id = appointment_update.barber_id
+    if appointment_update.service_id is not None:
+        appointment.service_id = appointment_update.service_id
+    if appointment_update.number_of_people is not None:
+        appointment.number_of_people = appointment_update.number_of_people
+    if appointment_update.full_name is not None:
+        appointment.full_name = appointment_update.full_name
+    if appointment_update.phone_number is not None:
+        # Update the phone number if provided in the update request
+        appointment.phone_number = appointment_update.phone_number
+
+    db.commit()
+    db.refresh(appointment)
+
+    # Load related entities for response
+    appointment = (
+        db.query(models.Appointment)
+        .options(
+            joinedload(models.Appointment.barber).joinedload(models.Barber.user),
+            joinedload(models.Appointment.service),
+            joinedload(models.Appointment.user)
+        )
+        .filter(models.Appointment.id == appointment_id)
+        .first()
+    )
+
+    # Prepare response with nested objects
+    if appointment.barber:
+        appointment.barber.full_name = appointment.barber.user.full_name
+        appointment.barber.email = appointment.barber.user.email
+        appointment.barber.phone_number = appointment.barber.user.phone_number
+
+    return appointment
