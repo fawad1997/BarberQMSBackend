@@ -10,7 +10,8 @@ from app.routers import (
     appointments,
     queue,
     feedback,
-    unregistered_users
+    unregistered_users,
+    sso_routes
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,6 +98,7 @@ def on_startup():
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
+app.include_router(sso_routes.router)
 app.include_router(users.router)
 app.include_router(shop_owners.router)
 app.include_router(barbers.router)
