@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.schemas import TIMEZONE, convert_to_utc
 from app.database import get_db
-from app.core.security import verify_password, create_access_token, get_password_hash
+from app.core.security import verify_password, create_access_token, get_password_hash, decode_access_token
 from app.core.dependencies import oauth2_scheme
 from datetime import timedelta, datetime
 import os
@@ -144,3 +144,54 @@ async def login_for_access_token(
         "is_active": user.is_active,
         "created_at": user.created_at
     }
+
+@router.get("/validate-token", response_model=schemas.TokenWithUserDetails)
+async def validate_token(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Validate a JWT token and return user details if valid.
+    This endpoint is used by the frontend after SSO login.
+    """
+    try:
+        # Decode the token
+        payload = decode_access_token(token)
+        if not payload or "sub" not in payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+        
+        user_id = payload.get("sub")
+        user = db.query(models.User).filter(models.User.id == int(user_id)).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+            
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is inactive"
+            )
+            
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number or "",
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at
+        }
+    except Exception as e:
+        logger.error(f"Token validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate token"
+        )

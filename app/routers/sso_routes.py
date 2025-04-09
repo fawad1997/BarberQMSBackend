@@ -92,13 +92,17 @@ async def google_callback(
                 from app.core.security import get_password_hash
                 hashed_password = get_password_hash(random_password)
                 
+                # Generate a random unique phone number placeholder
+                import uuid
+                random_phone = f"sso-{uuid.uuid4()}"[:20]  # Truncate to reasonable length
+                
                 new_user = User(
                     full_name=full_name,
                     email=user_info.email,
-                    phone_number=None,  # Will need to be filled later by user
+                    phone_number=random_phone,  # Use random unique phone number placeholder
                     hashed_password=hashed_password,
                     is_active=True,
-                    role=UserRole.USER
+                    role=UserRole.SHOP_OWNER
                 )
                 db.add(new_user)
                 db.commit()
