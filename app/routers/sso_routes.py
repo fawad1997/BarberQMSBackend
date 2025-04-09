@@ -24,7 +24,7 @@ if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not SECRET_KEY:
 router = APIRouter(prefix="/sso", tags=["sso"])
 
 # Define redirects for your frontend
-FRONTEND_LOGIN_SUCCESS_URL = os.getenv("FRONTEND_URL", "http://localhost:8080/login/success")
+FRONTEND_LOGIN_SUCCESS_URL = os.getenv("FRONTEND_URL_SUCCESS", "http://localhost:8080/login/success")
 FRONTEND_LOGIN_FAILURE_URL = os.getenv("FRONTEND_URL_FAILURE", "http://localhost:8080/login/failure")
 
 class UserInfo(BaseModel):
