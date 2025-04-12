@@ -30,8 +30,8 @@ if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not SECRET_KEY:
 router = APIRouter(prefix="/sso", tags=["sso"])
 
 # Define redirects for your frontend
-FRONTEND_LOGIN_SUCCESS_URL = os.getenv("FRONTEND_URL_SUCCESS", "http://localhost:8080/login/success")
-FRONTEND_LOGIN_FAILURE_URL = os.getenv("FRONTEND_URL_FAILURE", "http://localhost:8080/login/failure")
+FRONTEND_LOGIN_SUCCESS_URL = os.getenv("FRONTEND_URL_SUCCESS", "https://walkinonline.com/login/success")
+FRONTEND_LOGIN_FAILURE_URL = os.getenv("FRONTEND_URL_FAILURE", "https://walkinonline.com/login/failure")
 
 class UserInfo(BaseModel):
     id: Optional[str] = None
@@ -47,8 +47,8 @@ async def google_login():
     async with GoogleSSO(
         client_id=GOOGLE_CLIENT_ID,
         client_secret=GOOGLE_CLIENT_SECRET,
-        redirect_uri="http://localhost:8000/sso/google/callback",
-        allow_insecure_http=True  # Set to False in production with HTTPS
+        redirect_uri="https://walk-inonline.com/sso/google/callback",
+        allow_insecure_http=False  # Set to False in production with HTTPS
     ) as google_sso:
         return await google_sso.get_login_redirect()
 
@@ -61,8 +61,8 @@ async def facebook_login():
     async with FacebookSSO(
         client_id=FACEBOOK_CLIENT_ID,
         client_secret=FACEBOOK_CLIENT_SECRET,
-        redirect_uri="http://localhost:8000/sso/facebook/callback",
-        allow_insecure_http=True  # Set to False in production with HTTPS
+        redirect_uri="https://walk-inonline.com/sso/facebook/callback",
+        allow_insecure_http=False  # Set to False in production with HTTPS
     ) as facebook_sso:
         return await facebook_sso.get_login_redirect()
 
@@ -75,9 +75,9 @@ async def microsoft_login():
     async with MicrosoftSSO(
         client_id=MICROSOFT_CLIENT_ID,
         client_secret=MICROSOFT_CLIENT_SECRET,
-        redirect_uri="http://localhost:8000/sso/microsoft/callback",
+        redirect_uri="https://walk-inonline.com/sso/microsoft/callback",
         tenant="common",  # Use "common" for multi-tenant applications
-        allow_insecure_http=True  # Set to False in production with HTTPS
+        allow_insecure_http=False  # Set to False in production with HTTPS
     ) as microsoft_sso:
         return await microsoft_sso.get_login_redirect()
 
@@ -91,8 +91,8 @@ async def google_callback(
         async with GoogleSSO(
             client_id=GOOGLE_CLIENT_ID,
             client_secret=GOOGLE_CLIENT_SECRET,
-            redirect_uri="http://localhost:8000/sso/google/callback",
-            allow_insecure_http=True  # Set to False in production with HTTPS
+            redirect_uri="https://walk-inonline.com/sso/google/callback",
+            allow_insecure_http=False  # Set to False in production with HTTPS
         ) as google_sso:
             user_sso_info = await google_sso.verify_and_process(request)
             if not user_sso_info or not user_sso_info.email:
@@ -170,8 +170,8 @@ async def facebook_callback(
         async with FacebookSSO(
             client_id=FACEBOOK_CLIENT_ID,
             client_secret=FACEBOOK_CLIENT_SECRET,
-            redirect_uri="http://localhost:8000/sso/facebook/callback",
-            allow_insecure_http=True
+            redirect_uri="https://walk-inonline.com/sso/facebook/callback",
+            allow_insecure_http=False
         ) as facebook_sso:
             user_sso_info = await facebook_sso.verify_and_process(request)
             if not user_sso_info or not user_sso_info.email:
@@ -248,9 +248,9 @@ async def microsoft_callback(
         async with MicrosoftSSO(
             client_id=MICROSOFT_CLIENT_ID,
             client_secret=MICROSOFT_CLIENT_SECRET,
-            redirect_uri="http://localhost:8000/sso/microsoft/callback",
+            redirect_uri="https://walk-inonline.com/sso/microsoft/callback",
             tenant="common",  # Use "common" for multi-tenant applications
-            allow_insecure_http=True
+            allow_insecure_http=False
         ) as microsoft_sso:
             user_sso_info = await microsoft_sso.verify_and_process(request)
             if not user_sso_info or not user_sso_info.email:
