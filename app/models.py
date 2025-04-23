@@ -192,6 +192,7 @@ class Appointment(Base):
     barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     appointment_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
     status = Column(Enum(AppointmentStatus), default=AppointmentStatus.SCHEDULED)
     created_at = Column(DateTime, default=func.now())
     actual_start_time = Column(DateTime, nullable=True)
@@ -207,6 +208,19 @@ class Appointment(Base):
     service = relationship("Service", back_populates="appointments")
 
     def __init__(self, **kwargs):
+        if 'end_time' not in kwargs and 'appointment_time' in kwargs:
+            # If end_time is not provided but appointment_time is, calculate end_time
+            service_duration = 30  # Default duration in minutes
+            if 'service_id' in kwargs and kwargs['service_id']:
+                from sqlalchemy.orm import Session
+                from app.database import SessionLocal
+                db = SessionLocal()
+                service = db.query(Service).filter(Service.id == kwargs['service_id']).first()
+                if service:
+                    service_duration = service.duration
+                db.close()
+            kwargs['end_time'] = kwargs['appointment_time'] + timedelta(minutes=service_duration)
+        
         super().__init__(**kwargs)
         if self.user_id is None and (not self.phone_number or not self.full_name):
             raise ValueError("Either user_id or both phone_number and full_name must be provided")

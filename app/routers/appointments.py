@@ -147,11 +147,11 @@ async def create_appointment(
     new_appointment = models.Appointment(
         shop_id=appointment_in.shop_id,
         barber_id=selected_barber_id,
-        #service_id=appointment_in.service_id,
+        service_id = None if (val := getattr(appointment_in, 'service_id', None)) == 0 else val,
         appointment_time=appointment_time,
         status=models.AppointmentStatus.SCHEDULED,
         number_of_people=appointment_in.number_of_people,
-        #user_id=appointment_in.user_id,
+        user_id = None if (val := getattr(appointment_in, 'user_id', None)) == 0 else val,
         full_name=appointment_in.full_name,
         phone_number=appointment_in.phone_number
     )
@@ -302,6 +302,15 @@ def get_my_appointments(
     
     # Prepare response with nested objects for barber and service
     for appointment in appointments:
+        # Calculate end_time if not set
+        if not appointment.end_time and appointment.appointment_time:
+            service_duration = 30  # Default duration
+            if appointment.service_id:
+                service = db.query(models.Service).filter(models.Service.id == appointment.service_id).first()
+                if service:
+                    service_duration = service.duration
+            appointment.end_time = appointment.appointment_time + timedelta(minutes=service_duration)
+
         if appointment.barber:
             # Ensure user data is available
             appointment.barber.full_name = appointment.barber.user.full_name
@@ -791,22 +800,89 @@ async def update_appointment(
 
         # Update appointment fields
         appointment.appointment_time = appointment_time
+    # If not updating appointment time but updating barber, check if the barber is available at the existing time
+    elif appointment_update.barber_id is not None and appointment_update.barber_id != appointment.barber_id:
+        # Get the existing appointment time
+        appointment_time = appointment.appointment_time
+        weekday = appointment_time.weekday()
+        day_of_week = (weekday + 1) % 7
+        appt_time = appointment_time.time()
+        
+        # Get the barber
+        barber = db.query(models.Barber).filter(
+            models.Barber.id == appointment_update.barber_id,
+            models.Barber.shop_id == appointment.shop_id
+        ).first()
+        
+        if not barber:
+            raise HTTPException(status_code=404, detail="Barber not found")
+        
+        # Check barber schedule
+        schedule = db.query(models.BarberSchedule).filter(
+            models.BarberSchedule.barber_id == barber.id,
+            models.BarberSchedule.day_of_week == day_of_week
+        ).first()
+        
+        if not schedule:
+            raise HTTPException(status_code=400, detail="Barber is not scheduled to work on this day")
+        
+        if not (schedule.start_time <= appt_time <= schedule.end_time):
+            raise HTTPException(status_code=400, detail="Appointment time is outside barber's working hours")
+        
+        # Get service duration
+        service_duration = 30  # Default duration
+        service_id = appointment_update.service_id or appointment.service_id
+        if service_id:
+            service = db.query(models.Service).filter(
+                models.Service.id == service_id,
+                models.Service.shop_id == appointment.shop_id
+            ).first()
+            if service:
+                service_duration = service.duration
+        
+        appointment_end_time = appointment_time + timedelta(minutes=service_duration)
+        
+        # Check for conflicting appointments (excluding current appointment)
+        conflicting_appointments = db.query(models.Appointment).filter(
+            models.Appointment.barber_id == barber.id,
+            models.Appointment.status == models.AppointmentStatus.SCHEDULED,
+            models.Appointment.id != appointment_id,
+            models.Appointment.appointment_time < appointment_end_time,
+            appointment_time < models.Appointment.appointment_time + func.cast(
+                func.concat(str(service_duration), ' minutes'), Interval
+            )
+        ).all()
+        
+        if conflicting_appointments:
+            raise HTTPException(status_code=400, detail="Barber has conflicting appointments")
 
     # Update other fields if provided
     if appointment_update.barber_id is not None:
         appointment.barber_id = appointment_update.barber_id
+    
+    # Fix for service_id update - properly handle None values
     if appointment_update.service_id is not None:
-        appointment.service_id = appointment_update.service_id
+        # If service_id is 0, set it to None, otherwise use the provided value
+        appointment.service_id = None if appointment_update.service_id == 0 else appointment_update.service_id
+    
     if appointment_update.number_of_people is not None:
         appointment.number_of_people = appointment_update.number_of_people
+    
     if appointment_update.full_name is not None:
         appointment.full_name = appointment_update.full_name
+    
     if appointment_update.phone_number is not None:
-        # Update the phone number if provided in the update request
+        # Validate phone number format
+        if not appointment_update.phone_number.strip():
+            raise HTTPException(status_code=400, detail="Phone number cannot be empty")
         appointment.phone_number = appointment_update.phone_number
 
-    db.commit()
-    db.refresh(appointment)
+    try:
+        db.commit()
+        db.refresh(appointment)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
     # Load related entities for response
     appointment = (
