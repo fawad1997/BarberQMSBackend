@@ -9,16 +9,17 @@ import pytz
 
 # At the top of the file, add these imports
 TIMEZONE = pytz.timezone('America/Los_Angeles')
+UTC = pytz.UTC
 
 # Add these timezone helper functions
 def convert_to_pacific(dt: datetime) -> datetime:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = UTC.localize(dt)
     return dt.astimezone(TIMEZONE)
 
 def validate_timezone(dt: datetime) -> datetime:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = UTC.localize(dt)
     return convert_to_pacific(dt)
 
 def convert_to_utc(dt: datetime) -> datetime:
@@ -26,7 +27,7 @@ def convert_to_utc(dt: datetime) -> datetime:
         pacific_dt = TIMEZONE.localize(dt)
     else:
         pacific_dt = dt.astimezone(TIMEZONE)
-    return pacific_dt.astimezone(timezone.utc)
+    return pacific_dt.astimezone(UTC)
 
 class UserRole(str, Enum):
     user = "USER"
@@ -271,33 +272,106 @@ class BarberUpdate(BaseModel):
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
+class ScheduleRepeatFrequency(str, Enum):
+    NONE = "NONE"
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
+
+    def __str__(self):
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value):
+        # Handle case-insensitive matching
+        if isinstance(value, str):
+            value = value.upper()
+            for member in cls:
+                if member.value == value:
+                    return member
+        return None
 
 class BarberScheduleBase(BaseModel):
     barber_id: int
-    day_of_week: int = Field(
-        ..., 
-        ge=0, 
-        le=6, 
-        description="0=Sunday, 1=Monday, ..., 6=Saturday"
-    )
-    start_time: time   # Changed from str to time
-    end_time: time     # Changed from str to time
+    start_date: datetime
+    end_date: datetime
+    repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+
+    @field_validator('start_date', 'end_date')
+    def validate_dates(cls, v):
+        if v is not None:
+            # If timezone-naive, assume it's in Pacific time
+            if v.tzinfo is None:
+                v = TIMEZONE.localize(v)
+            # Convert to UTC for storage
+            return v.astimezone(UTC)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class BarberScheduleCreate(BarberScheduleBase):
-    # Removed field validators as Pydantic handles time parsing
     pass
 
 class BarberScheduleUpdate(BaseModel):
-    day_of_week: Optional[int] = Field(
-        None, 
-        ge=0, 
-        le=6, 
-        description="0=Sunday, 1=Monday, ..., 6=Saturday"
-    )
-    start_time: Optional[time] = None
-    end_time: Optional[time] = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    repeat_frequency: ScheduleRepeatFrequency | None = None
+
+    @field_validator('start_date', 'end_date')
+    def validate_dates(cls, v):
+        if v is not None:
+            # Convert to UTC if timezone-naive
+            if v.tzinfo is None:
+                v = TIMEZONE.localize(v).astimezone(timezone.utc)
+            else:
+                v = v.astimezone(timezone.utc)
+        return v
+
+    class Config:
+        from_attributes = True
+
+class BarberSchedule(BarberScheduleBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('created_at', 'updated_at')
+    def validate_timestamps(cls, v):
+        if v is not None:
+            # Convert to UTC if timezone-naive
+            if v.tzinfo is None:
+                v = timezone.utc.localize(v)
+            else:
+                v = v.astimezone(timezone.utc)
+        return v
+
+    class Config:
+        from_attributes = True
 
 class BarberScheduleResponse(BaseModel):
+    id: int
+    barber_id: int
+    start_date: datetime
+    end_date: datetime
+    repeat_frequency: ScheduleRepeatFrequency
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('start_date', 'end_date', 'created_at', 'updated_at')
+    def validate_dates(cls, v):
+        if v is not None:
+            # Convert to UTC if timezone-naive
+            if v.tzinfo is None:
+                v = UTC.localize(v)
+            # Convert to Pacific time for response
+            return v.astimezone(TIMEZONE)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Keep the old response schema for backward compatibility
+class BarberScheduleResponseLegacy(BaseModel):
     id: int
     barber_id: int
     shop_id: int
@@ -443,12 +517,20 @@ class FeedbackResponse(FeedbackBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopDetailedBarberSchedule(BarberScheduleResponse):
+class ShopDetailedBarberSchedule(BarberScheduleResponseLegacy):
     day_name: str = ""
 
     @computed_field
     def formatted_time(self) -> str:
-        return f"{self.start_time.strftime('%I:%M %p')} - {self.end_time.strftime('%I:%M %p')}"
+        # Convert times to Pacific timezone for display
+        start = datetime.combine(datetime.today(), self.start_time)
+        end = datetime.combine(datetime.today(), self.end_time)
+        
+        # Localize to Pacific time
+        start = TIMEZONE.localize(start)
+        end = TIMEZONE.localize(end)
+        
+        return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
 
 class ShopDetailedBarber(BarberResponse):
     schedules: List[ShopDetailedBarberSchedule] = []

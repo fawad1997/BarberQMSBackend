@@ -10,6 +10,7 @@ from app.core.dependencies import get_current_user_by_role
 from app.core.security import get_password_hash
 from app.models import UserRole
 from app.utils.shop_utils import is_shop_open, calculate_wait_time, format_time
+from app.utils.schedule_utils import get_recurring_instances, check_schedule_conflicts
 import logging
 import aiofiles
 import os
@@ -1383,47 +1384,39 @@ def create_barber_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber not found")
 
-    # Check if schedule already exists for this day
-    existing_schedule = db.query(models.BarberSchedule).filter(
-        models.BarberSchedule.barber_id == barber.id,
-        models.BarberSchedule.day_of_week == schedule_in.day_of_week
-    ).first()
-    
-    if existing_schedule:
+    # Check for schedule conflicts
+    if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date):
         raise HTTPException(
             status_code=400,
-            detail=f"Schedule already exists for day {schedule_in.day_of_week}"
+            detail="Schedule conflict: Another schedule exists for this time period"
         )
 
-    # No need to convert start_time and end_time; they are already time objects
+    # Create new schedule
     new_schedule = models.BarberSchedule(
         barber_id=barber.id,
-        day_of_week=schedule_in.day_of_week,
-        start_time=schedule_in.start_time,
-        end_time=schedule_in.end_time
+        start_date=schedule_in.start_date,
+        end_date=schedule_in.end_date,
+        repeat_frequency=schedule_in.repeat_frequency
     )
-
+    
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
-
-    # Ensure the 'barber' relationship is loaded
-    _ = new_schedule.barber  # Accessing to load the relationship
-
-    # Return the response using Pydantic's model_validate
-    return schemas.BarberScheduleResponse.model_validate(new_schedule)
-
-
+    
+    return new_schedule
 
 @router.get("/shops/{shop_id}/barbers/{barber_id}/schedules/", response_model=List[schemas.BarberScheduleResponse])
 def get_barber_schedules(
     shop_id: int,
     barber_id: int,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    include_recurring: bool = True,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Get all schedules for a barber"""
-    # Verify shop ownership
+    """Get all schedules for a barber in the shop"""
+    # Verify shop ownership and get barber
     shop = db.query(models.Shop).filter(
         models.Shop.id == shop_id,
         models.Shop.owner_id == current_user.id
@@ -1431,7 +1424,6 @@ def get_barber_schedules(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    # Verify barber exists in the shop
     barber = db.query(models.Barber).filter(
         models.Barber.id == barber_id,
         models.Barber.shop_id == shop.id
@@ -1439,16 +1431,30 @@ def get_barber_schedules(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber not found")
 
-    # Eagerly load the barber relationship to access shop_id
-    schedules = db.query(models.BarberSchedule).options(
-        joinedload(models.BarberSchedule.barber)
-    ).filter(
+    # Get base schedules
+    query = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.barber_id == barber.id
-    ).all()
-
-    # Convert schedules to response format using Pydantic's model_validate (Pydantic v2)
-    return [schemas.BarberScheduleResponse.model_validate(schedule) for schedule in schedules]
-
+    )
+    schedules = query.order_by(models.BarberSchedule.start_date).all()
+    
+    if not include_recurring or not start_date or not end_date:
+        return schedules
+    
+    # Process recurring schedules
+    recurring_instances = []
+    for schedule in schedules:
+        instances = get_recurring_instances(schedule, start_date, end_date)
+        for instance in instances:
+            recurring_schedule = models.BarberSchedule(
+                id=schedule.id,
+                barber_id=schedule.barber_id,
+                start_date=instance["start_datetime"],
+                end_date=instance["end_datetime"],
+                repeat_frequency=schedule.repeat_frequency
+            )
+            recurring_instances.append(recurring_schedule)
+    
+    return recurring_instances
 
 @router.put(
     "/shops/{shop_id}/barbers/{barber_id}/schedules/{schedule_id}", 
@@ -1478,6 +1484,7 @@ def update_barber_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber not found")
 
+    # Get the schedule
     schedule = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.id == schedule_id,
         models.BarberSchedule.barber_id == barber.id
@@ -1485,34 +1492,25 @@ def update_barber_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    # Update schedule fields if provided
-    if schedule_update.start_time is not None:
-        schedule.start_time = schedule_update.start_time
-    if schedule_update.end_time is not None:
-        schedule.end_time = schedule_update.end_time
-    if schedule_update.day_of_week is not None:
-        # Check if schedule already exists for the new day
-        existing_schedule = db.query(models.BarberSchedule).filter(
-            models.BarberSchedule.barber_id == barber.id,
-            models.BarberSchedule.day_of_week == schedule_update.day_of_week,
-            models.BarberSchedule.id != schedule_id
-        ).first()
-        if existing_schedule:
+    # Check for schedule conflicts if dates are being updated
+    if schedule_update.start_date or schedule_update.end_date:
+        new_start = schedule_update.start_date or schedule.start_date
+        new_end = schedule_update.end_date or schedule.end_date
+        
+        if check_schedule_conflicts(db, barber.id, new_start, new_end, exclude_schedule_id=schedule.id):
             raise HTTPException(
                 status_code=400,
-                detail=f"Schedule already exists for day {schedule_update.day_of_week}"
+                detail="Schedule conflict: Another schedule exists for this time period"
             )
-        schedule.day_of_week = schedule_update.day_of_week
 
-    db.add(schedule)
+    # Update schedule fields
+    for field, value in schedule_update.model_dump(exclude_unset=True).items():
+        setattr(schedule, field, value)
+
     db.commit()
     db.refresh(schedule)
-
-    # Ensure the 'barber' relationship is loaded
-    _ = schedule.barber  # Accessing to load the relationship
-
-    # Return the response using Pydantic's model_validate
-    return schemas.BarberScheduleResponse.model_validate(schedule)
+    
+    return schedule
 
 # Add duplicate route with trailing slash to ensure URL matching
 @router.put(

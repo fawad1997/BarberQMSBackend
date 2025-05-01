@@ -269,22 +269,28 @@ class QueueEntry(Base):
     barber = relationship("Barber")
 
 
+class ScheduleRepeatFrequency(enum.Enum):
+    NONE = "NONE"
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
+
+
 class BarberSchedule(Base):
     __tablename__ = "barber_schedules"
 
     id = Column(Integer, primary_key=True, index=True)
     barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False)
-    day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
-    start_time = Column(Time, nullable=False)
-    end_time = Column(Time, nullable=False)
-
-    # Ensure a barber can have only one schedule per day_of_week
-    __table_args__ = (
-        UniqueConstraint('barber_id', 'day_of_week', name='uix_barber_day'),
-    )
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    repeat_frequency = Column(Enum(ScheduleRepeatFrequency), default=ScheduleRepeatFrequency.NONE)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     barber = relationship("Barber", back_populates="schedules")
+
     @property
     def shop_id(self):
         return self.barber.shop_id
