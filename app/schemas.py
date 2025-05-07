@@ -295,6 +295,14 @@ class BarberScheduleBase(BaseModel):
             v = v.replace(tzinfo=timezone.utc)
         return v
 
+    @field_validator("end_date")
+    def validate_end_date(cls, v, info):
+        if "start_date" in info.data:
+            start_date = info.data["start_date"]
+            if v <= start_date:
+                raise ValueError("End date must be after start date")
+        return v
+
     model_config = ConfigDict(from_attributes=True)
 
 class BarberScheduleCreate(BarberScheduleBase):

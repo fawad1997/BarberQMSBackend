@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Tuple
 from app.models import BarberSchedule, ScheduleRepeatFrequency
 import pytz
 
@@ -127,4 +127,34 @@ def check_schedule_conflicts(
                 instance["end_datetime"] >= start_date):
                 return True
     
-    return False 
+    return False
+
+def generate_schedule_dates(
+    start_date: datetime,
+    end_date: datetime,
+    repeat_frequency: ScheduleRepeatFrequency
+) -> List[Tuple[datetime, datetime]]:
+    """
+    Generate schedule dates based on repeat frequency.
+    Returns a list of (start_date, end_date) tuples.
+    """
+    if repeat_frequency == ScheduleRepeatFrequency.NONE:
+        return [(start_date, end_date)]
+
+    schedules = []
+    current_date = start_date
+    duration = end_date - start_date
+
+    if repeat_frequency == ScheduleRepeatFrequency.DAILY:
+        while current_date <= end_date:
+            schedule_end = current_date + duration
+            schedules.append((current_date, schedule_end))
+            current_date += timedelta(days=1)
+
+    elif repeat_frequency == ScheduleRepeatFrequency.WEEKLY:
+        while current_date <= end_date:
+            schedule_end = current_date + duration
+            schedules.append((current_date, schedule_end))
+            current_date += timedelta(days=7)
+
+    return schedules 

@@ -273,11 +273,16 @@ class ScheduleRepeatFrequency(enum.Enum):
     NONE = "NONE"
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
-    MONTHLY = "MONTHLY"
-    YEARLY = "YEARLY"
 
     @classmethod
     def _missing_(cls, value):
+        if value is None:
+            return cls.NONE
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                return cls.NONE
         return cls.NONE
 
 
