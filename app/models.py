@@ -276,15 +276,23 @@ class ScheduleRepeatFrequency(enum.Enum):
     MONTHLY = "MONTHLY"
     YEARLY = "YEARLY"
 
+    @classmethod
+    def _missing_(cls, value):
+        return cls.NONE
+
 
 class BarberSchedule(Base):
     __tablename__ = "barber_schedules"
 
     id = Column(Integer, primary_key=True, index=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False)
+    barber_id = Column(Integer, ForeignKey("barbers.id", ondelete="CASCADE"), nullable=False)
     start_date = Column(DateTime(timezone=True), nullable=False)
     end_date = Column(DateTime(timezone=True), nullable=False)
-    repeat_frequency = Column(Enum(ScheduleRepeatFrequency), default=ScheduleRepeatFrequency.NONE)
+    repeat_frequency = Column(
+        Enum(ScheduleRepeatFrequency, name="schedulerepeatfrequency", create_constraint=False),
+        nullable=False,
+        server_default="NONE"
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

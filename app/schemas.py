@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
-from app.models import AppointmentStatus, BarberStatus, QueueStatus
+from app.models import AppointmentStatus, BarberStatus, QueueStatus, ScheduleRepeatFrequency
 from enum import Enum
 from datetime import datetime, timezone, time, timedelta
 import pytz
@@ -272,40 +272,27 @@ class BarberUpdate(BaseModel):
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
-class ScheduleRepeatFrequency(str, Enum):
-    NONE = "NONE"
-    DAILY = "DAILY"
-    WEEKLY = "WEEKLY"
-    MONTHLY = "MONTHLY"
-    YEARLY = "YEARLY"
-
-    def __str__(self):
-        return self.value
-
-    @classmethod
-    def _missing_(cls, value):
-        # Handle case-insensitive matching
-        if isinstance(value, str):
-            value = value.upper()
-            for member in cls:
-                if member.value == value:
-                    return member
-        return None
-
 class BarberScheduleBase(BaseModel):
     barber_id: int
     start_date: datetime
     end_date: datetime
     repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
 
-    @field_validator('start_date', 'end_date')
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
+        return v
+
+    @field_validator("start_date", "end_date")
     def validate_dates(cls, v):
-        if v is not None:
-            # If timezone-naive, assume it's in Pacific time
-            if v.tzinfo is None:
-                v = TIMEZONE.localize(v)
-            # Convert to UTC for storage
-            return v.astimezone(UTC)
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
         return v
 
     model_config = ConfigDict(from_attributes=True)
@@ -318,18 +305,24 @@ class BarberScheduleUpdate(BaseModel):
     end_date: datetime | None = None
     repeat_frequency: ScheduleRepeatFrequency | None = None
 
-    @field_validator('start_date', 'end_date')
-    def validate_dates(cls, v):
-        if v is not None:
-            # Convert to UTC if timezone-naive
-            if v.tzinfo is None:
-                v = TIMEZONE.localize(v).astimezone(timezone.utc)
-            else:
-                v = v.astimezone(timezone.utc)
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
         return v
 
-    class Config:
-        from_attributes = True
+    @field_validator("start_date", "end_date")
+    def validate_dates(cls, v):
+        if v is not None and v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class BarberSchedule(BarberScheduleBase):
     id: int

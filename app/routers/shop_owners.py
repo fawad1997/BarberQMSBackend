@@ -1384,13 +1384,6 @@ def create_barber_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber not found")
 
-    # Check for schedule conflicts
-    if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date):
-        raise HTTPException(
-            status_code=400,
-            detail="Schedule conflict: Another schedule exists for this time period"
-        )
-
     # Create new schedule
     new_schedule = models.BarberSchedule(
         barber_id=barber.id,
