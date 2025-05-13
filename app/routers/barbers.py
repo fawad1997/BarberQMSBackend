@@ -8,6 +8,8 @@ from app import models, schemas
 from app.database import get_db
 from app.core.dependencies import get_current_user_by_role
 from app.models import UserRole, AppointmentStatus
+from app.utils.schedule_utils import get_recurring_instances, check_schedule_conflicts
+from sqlalchemy import or_, and_
 
 router = APIRouter(prefix="/barbers", tags=["Barbers"])
 
@@ -67,34 +69,31 @@ def create_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
-    existing_schedule = db.query(models.BarberSchedule).filter(
-        models.BarberSchedule.barber_id == barber.id,
-        models.BarberSchedule.day_of_week == schedule_in.day_of_week
-    ).first()
-    
-    if existing_schedule:
+    # Check for schedule conflicts
+    if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date):
         raise HTTPException(
             status_code=400,
-            detail=f"Schedule already exists for day {schedule_in.day_of_week}"
+            detail="Schedule conflict: Another schedule exists for this time period"
         )
 
     new_schedule = models.BarberSchedule(
         barber_id=barber.id,
-        day_of_week=schedule_in.day_of_week,
-        start_time=schedule_in.start_time,
-        end_time=schedule_in.end_time
+        start_date=schedule_in.start_date,
+        end_date=schedule_in.end_date,
+        repeat_frequency=schedule_in.repeat_frequency
     )
 
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
     
-    # Ensure barber relationship is loaded
-    _ = new_schedule.barber
-    return schemas.BarberScheduleResponse.model_validate(new_schedule)
+    return new_schedule
 
 @router.get("/schedules/", response_model=List[schemas.BarberScheduleResponse])
 def get_my_schedules(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    include_recurring: bool = True,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_barber)
 ):
@@ -102,13 +101,60 @@ def get_my_schedules(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
-    schedules = db.query(models.BarberSchedule).options(
-        joinedload(models.BarberSchedule.barber)
-    ).filter(
+    # Get base schedules
+    query = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.barber_id == barber.id
-    ).all()
+    )
     
-    return [schemas.BarberScheduleResponse.model_validate(schedule) for schedule in schedules]
+    # If start_date and end_date are provided, filter schedules within that range
+    if start_date and end_date:
+        # Ensure dates are timezone-aware
+        start_date = ensure_timezone_aware(start_date)
+        end_date = ensure_timezone_aware(end_date)
+        
+        # Get all schedules that might overlap with the date range
+        schedules = query.filter(
+            or_(
+                # Schedule starts within the range
+                and_(
+                    models.BarberSchedule.start_date >= start_date,
+                    models.BarberSchedule.start_date <= end_date
+                ),
+                # Schedule ends within the range
+                and_(
+                    models.BarberSchedule.end_date >= start_date,
+                    models.BarberSchedule.end_date <= end_date
+                ),
+                # Schedule spans the entire range
+                and_(
+                    models.BarberSchedule.start_date <= start_date,
+                    models.BarberSchedule.end_date >= end_date
+                )
+            )
+        ).order_by(models.BarberSchedule.start_date).all()
+    else:
+        schedules = query.order_by(models.BarberSchedule.start_date).all()
+    
+    if not include_recurring or not start_date or not end_date:
+        return schedules
+    
+    # Process recurring schedules
+    recurring_instances = []
+    for schedule in schedules:
+        instances = get_recurring_instances(schedule, start_date, end_date)
+        for instance in instances:
+            recurring_schedule = models.BarberSchedule(
+                id=schedule.id,
+                barber_id=schedule.barber_id,
+                start_date=instance["start_datetime"],
+                end_date=instance["end_datetime"],
+                repeat_frequency=schedule.repeat_frequency,
+                created_at=schedule.created_at,
+                updated_at=schedule.updated_at
+            )
+            recurring_instances.append(recurring_schedule)
+    
+    return recurring_instances
 
 @router.put("/schedules/{schedule_id}", response_model=schemas.BarberScheduleResponse)
 def update_schedule(
@@ -128,30 +174,25 @@ def update_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    if schedule_update.start_time is not None:
-        schedule.start_time = schedule_update.start_time
-    if schedule_update.end_time is not None:
-        schedule.end_time = schedule_update.end_time
-    if schedule_update.day_of_week is not None:
-        existing_schedule = db.query(models.BarberSchedule).filter(
-            models.BarberSchedule.barber_id == barber.id,
-            models.BarberSchedule.day_of_week == schedule_update.day_of_week,
-            models.BarberSchedule.id != schedule_id
-        ).first()
-        if existing_schedule:
+    # Check for schedule conflicts if dates are being updated
+    if schedule_update.start_date or schedule_update.end_date:
+        new_start = schedule_update.start_date or schedule.start_date
+        new_end = schedule_update.end_date or schedule.end_date
+        
+        if check_schedule_conflicts(db, barber.id, new_start, new_end, exclude_schedule_id=schedule.id):
             raise HTTPException(
                 status_code=400,
-                detail=f"Schedule already exists for day {schedule_update.day_of_week}"
+                detail="Schedule conflict: Another schedule exists for this time period"
             )
-        schedule.day_of_week = schedule_update.day_of_week
 
-    db.add(schedule)
+    # Update schedule fields
+    for field, value in schedule_update.model_dump(exclude_unset=True).items():
+        setattr(schedule, field, value)
+
     db.commit()
     db.refresh(schedule)
     
-    # Ensure barber relationship is loaded
-    _ = schedule.barber
-    return schemas.BarberScheduleResponse.model_validate(schedule)
+    return schedule
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(

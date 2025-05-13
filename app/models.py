@@ -214,6 +214,7 @@ class Appointment(Base):
     barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     appointment_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
     status = Column(Enum(AppointmentStatus), default=AppointmentStatus.SCHEDULED)
     created_at = Column(DateTime, default=func.now())
     actual_start_time = Column(DateTime, nullable=True)
@@ -231,6 +232,19 @@ class Appointment(Base):
     service = relationship("Service", back_populates="appointments")
 
     def __init__(self, **kwargs):
+        if 'end_time' not in kwargs and 'appointment_time' in kwargs:
+            # If end_time is not provided but appointment_time is, calculate end_time
+            service_duration = 30  # Default duration in minutes
+            if 'service_id' in kwargs and kwargs['service_id']:
+                from sqlalchemy.orm import Session
+                from app.database import SessionLocal
+                db = SessionLocal()
+                service = db.query(Service).filter(Service.id == kwargs['service_id']).first()
+                if service:
+                    service_duration = service.duration
+                db.close()
+            kwargs['end_time'] = kwargs['appointment_time'] + timedelta(minutes=service_duration)
+        
         super().__init__(**kwargs)
         if self.user_id is None and (not self.phone_number or not self.full_name):
             raise ValueError("Either user_id or both phone_number and full_name must be provided")
@@ -281,22 +295,42 @@ class QueueEntry(Base):
     barber = relationship("Barber")
 
 
+class ScheduleRepeatFrequency(enum.Enum):
+    NONE = "NONE"
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    WEEKLY_NO_WEEKENDS = "WEEKLY_NO_WEEKENDS"
+
+    @classmethod
+    def _missing_(cls, value):
+        if value is None:
+            return cls.NONE
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                return cls.NONE
+        return cls.NONE
+
+
 class BarberSchedule(Base):
     __tablename__ = "barber_schedules"
 
     id = Column(Integer, primary_key=True, index=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=False)
-    day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
-    start_time = Column(Time, nullable=False)
-    end_time = Column(Time, nullable=False)
-
-    # Ensure a barber can have only one schedule per day_of_week
-    __table_args__ = (
-        UniqueConstraint('barber_id', 'day_of_week', name='uix_barber_day'),
+    barber_id = Column(Integer, ForeignKey("barbers.id", ondelete="CASCADE"), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    repeat_frequency = Column(
+        Enum(ScheduleRepeatFrequency, name="schedulerepeatfrequency", create_constraint=False),
+        nullable=False,
+        server_default="NONE"
     )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     barber = relationship("Barber", back_populates="schedules")
+
     @property
     def shop_id(self):
         return self.barber.shop_id

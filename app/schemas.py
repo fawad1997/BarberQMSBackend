@@ -2,24 +2,25 @@
 
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
-from app.models import AppointmentStatus, BarberStatus, QueueStatus
+from app.models import AppointmentStatus, BarberStatus, QueueStatus, ScheduleRepeatFrequency
 from enum import Enum
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta
 import pytz
 import re
 
 # At the top of the file, add these imports
 TIMEZONE = pytz.timezone('America/Los_Angeles')
+UTC = pytz.UTC
 
 # Add these timezone helper functions
 def convert_to_pacific(dt: datetime) -> datetime:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = UTC.localize(dt)
     return dt.astimezone(TIMEZONE)
 
 def validate_timezone(dt: datetime) -> datetime:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = UTC.localize(dt)
     return convert_to_pacific(dt)
 
 def convert_to_utc(dt: datetime) -> datetime:
@@ -27,7 +28,7 @@ def convert_to_utc(dt: datetime) -> datetime:
         pacific_dt = TIMEZONE.localize(dt)
     else:
         pacific_dt = dt.astimezone(TIMEZONE)
-    return pacific_dt.astimezone(timezone.utc)
+    return pacific_dt.astimezone(UTC)
 
 def generate_slug(name: str) -> str:
     """Generate a URL-friendly slug from a string"""
@@ -94,11 +95,20 @@ class AppointmentBase(BaseModel):
     barber_id: Optional[int] = None
     service_id: Optional[int] = None
     appointment_time: datetime
+    end_time: Optional[datetime] = None
     number_of_people: Optional[int] = Field(default=1, ge=1)
 
-    @field_validator('appointment_time')
-    def validate_appointment_time(cls, v):
-        return validate_timezone(v)
+    @field_validator('appointment_time', 'end_time')
+    def validate_times(cls, v, info):
+        if v is not None:
+            v = validate_timezone(v)
+            if info.field_name == 'end_time' and 'appointment_time' in info.data:
+                appointment_time = info.data['appointment_time']
+                if v <= appointment_time:
+                    raise ValueError("End time must be after appointment time")
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class AppointmentCreate(AppointmentBase):
     user_id: Optional[int] = None
@@ -115,6 +125,24 @@ class AppointmentCreate(AppointmentBase):
             raise ValueError("full_name and phone_number are required for guest users")
         return v
 
+    @field_validator('end_time')
+    def validate_end_time(cls, v, info):
+        if v is None and 'appointment_time' in info.data and 'service_id' in info.data:
+            # If end_time is not provided, calculate it based on service duration
+            from app.database import SessionLocal
+            from app.models import Service
+            db = SessionLocal()
+            try:
+                service = db.query(Service).filter(Service.id == info.data['service_id']).first()
+                if service:
+                    duration = service.duration
+                else:
+                    duration = 30  # Default duration if service not found
+            finally:
+                db.close()
+            return info.data['appointment_time'] + timedelta(minutes=duration)
+        return v
+
 class AppointmentStatusUpdate(BaseModel):
     status: AppointmentStatus
 
@@ -127,9 +155,9 @@ class AppointmentResponse(AppointmentBase):
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
 
-    # Add validator for created_at
-    @field_validator('created_at', 'actual_start_time', 'actual_end_time')
-    def validate_created_at(cls, v):
+    # Add validator for all datetime fields
+    @field_validator('created_at', 'actual_start_time', 'actual_end_time', 'end_time')
+    def validate_times(cls, v):
         if v is not None:
             return validate_timezone(v)
         return v
@@ -290,33 +318,107 @@ class BarberUpdate(BaseModel):
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
-
 class BarberScheduleBase(BaseModel):
     barber_id: int
-    day_of_week: int = Field(
-        ..., 
-        ge=0, 
-        le=6, 
-        description="0=Sunday, 1=Monday, ..., 6=Saturday"
-    )
-    start_time: time   # Changed from str to time
-    end_time: time     # Changed from str to time
+    start_date: datetime
+    end_date: datetime
+    repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
+        return v
+
+    @field_validator("start_date", "end_date")
+    def validate_dates(cls, v):
+        if v.tzinfo is None:
+            v = UTC.localize(v)
+        return v.astimezone(TIMEZONE)
+
+    @field_validator("end_date")
+    def validate_end_date(cls, v, info):
+        if "start_date" in info.data:
+            start_date = info.data["start_date"]
+            if v <= start_date:
+                raise ValueError("End date must be after start date")
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class BarberScheduleCreate(BarberScheduleBase):
-    # Removed field validators as Pydantic handles time parsing
     pass
 
 class BarberScheduleUpdate(BaseModel):
-    day_of_week: Optional[int] = Field(
-        None, 
-        ge=0, 
-        le=6, 
-        description="0=Sunday, 1=Monday, ..., 6=Saturday"
-    )
-    start_time: Optional[time] = None
-    end_time: Optional[time] = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    repeat_frequency: ScheduleRepeatFrequency | None = None
+
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
+        return v
+
+    @field_validator("start_date", "end_date")
+    def validate_dates(cls, v):
+        if v is not None and v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+class BarberSchedule(BarberScheduleBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('created_at', 'updated_at')
+    def validate_timestamps(cls, v):
+        if v is not None:
+            # Convert to UTC if timezone-naive
+            if v.tzinfo is None:
+                v = timezone.utc.localize(v)
+            else:
+                v = v.astimezone(timezone.utc)
+        return v
+
+    class Config:
+        from_attributes = True
 
 class BarberScheduleResponse(BaseModel):
+    id: int
+    barber_id: int
+    start_date: datetime
+    end_date: datetime
+    repeat_frequency: ScheduleRepeatFrequency
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('start_date', 'end_date', 'created_at', 'updated_at')
+    def validate_dates(cls, v):
+        if v is not None:
+            # Convert to UTC if timezone-naive
+            if v.tzinfo is None:
+                v = UTC.localize(v)
+            # Convert to Pacific time for response
+            return v.astimezone(TIMEZONE)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Keep the old response schema for backward compatibility
+class BarberScheduleResponseLegacy(BaseModel):
     id: int
     barber_id: int
     shop_id: int
@@ -462,12 +564,20 @@ class FeedbackResponse(FeedbackBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopDetailedBarberSchedule(BarberScheduleResponse):
+class ShopDetailedBarberSchedule(BarberScheduleResponseLegacy):
     day_name: str = ""
 
     @computed_field
     def formatted_time(self) -> str:
-        return f"{self.start_time.strftime('%I:%M %p')} - {self.end_time.strftime('%I:%M %p')}"
+        # Convert times to Pacific timezone for display
+        start = datetime.combine(datetime.today(), self.start_time)
+        end = datetime.combine(datetime.today(), self.end_time)
+        
+        # Localize to Pacific time
+        start = TIMEZONE.localize(start)
+        end = TIMEZONE.localize(end)
+        
+        return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
 
 class ShopDetailedBarber(BarberResponse):
     schedules: List[ShopDetailedBarberSchedule] = []
@@ -532,6 +642,18 @@ class DetailedAppointmentResponse(AppointmentResponse):
     barber: Optional[BarberInfo] = None
     service: Optional[ServiceInfo] = None
     
+    @computed_field
+    def duration_minutes(self) -> int:
+        print('duration_minutes->',self.full_name, self.end_time, self.appointment_time)
+
+        if self.end_time and self.appointment_time:
+            # Convert both to UTC, assuming naive datetimes are in local time (you can adjust this)
+            end = self.end_time.astimezone(timezone.utc) if self.end_time.tzinfo else self.end_time.replace(tzinfo=timezone.utc)
+            start = self.appointment_time.astimezone(timezone.utc) if self.appointment_time.tzinfo else self.appointment_time.replace(tzinfo=timezone.utc)
+            print('end->', end, 'start->', start, 'duration->', int((end - start).total_seconds() / 60))
+            return int((end - start).total_seconds() / 60)
+
+        return 30  # Default duration
     model_config = ConfigDict(from_attributes=True)
 
 class DisplayQueueItem(BaseModel):
@@ -562,14 +684,21 @@ class SimplifiedQueueResponse(BaseModel):
 
 class AppointmentUpdate(BaseModel):
     appointment_time: Optional[datetime] = None
-    #barber_id: Optional[int] = None
-    #service_id: Optional[int] = None
+    end_time: Optional[datetime] = None
+    barber_id: Optional[int] = None
+    service_id: Optional[int] = None
     number_of_people: Optional[int] = Field(default=None, ge=1)
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
 
     @field_validator('appointment_time')
     def validate_appointment_time(cls, v):
+        if v:
+            return validate_timezone(v)
+        return v
+    
+    @field_validator('end_time')
+    def validate_end_time(cls, v):
         if v:
             return validate_timezone(v)
         return v
