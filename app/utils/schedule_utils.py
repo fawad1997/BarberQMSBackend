@@ -149,12 +149,20 @@ def generate_schedule_dates(
         while current_date <= end_date:
             schedule_end = current_date + duration
             schedules.append((current_date, schedule_end))
-            current_date += timedelta(days=1)
+            current_date = current_date + timedelta(days=1)
 
     elif repeat_frequency == ScheduleRepeatFrequency.WEEKLY:
         while current_date <= end_date:
             schedule_end = current_date + duration
             schedules.append((current_date, schedule_end))
-            current_date += timedelta(days=7)
+            current_date = current_date + timedelta(days=7)
+
+    elif repeat_frequency == ScheduleRepeatFrequency.WEEKLY_NO_WEEKENDS:
+        while current_date <= end_date:
+            # Skip weekends (5 = Saturday, 6 = Sunday)
+            if current_date.weekday() < 5:  # Only process weekdays (0-4)
+                schedule_end = current_date + duration
+                schedules.append((current_date, schedule_end))
+            current_date = current_date + timedelta(days=1)
 
     return schedules 

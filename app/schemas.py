@@ -292,8 +292,8 @@ class BarberScheduleBase(BaseModel):
     @field_validator("start_date", "end_date")
     def validate_dates(cls, v):
         if v.tzinfo is None:
-            v = v.replace(tzinfo=timezone.utc)
-        return v
+            v = UTC.localize(v)
+        return v.astimezone(TIMEZONE)
 
     @field_validator("end_date")
     def validate_end_date(cls, v, info):

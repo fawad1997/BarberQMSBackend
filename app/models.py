@@ -273,6 +273,7 @@ class ScheduleRepeatFrequency(enum.Enum):
     NONE = "NONE"
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
+    WEEKLY_NO_WEEKENDS = "WEEKLY_NO_WEEKENDS"
 
     @classmethod
     def _missing_(cls, value):
