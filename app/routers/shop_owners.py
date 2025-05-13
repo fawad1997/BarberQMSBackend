@@ -26,17 +26,71 @@ get_current_shop_owner = get_current_user_by_role(UserRole.SHOP_OWNER)
 UPLOAD_DIR = "static/advertisements"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Add this function after the imports but before the routes
+async def get_shop_by_id_or_slug(shop_id_or_slug: str, db: Session, user_id: int):
+    """Helper function to get a shop by ID or slug and verify ownership."""
+    try:
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == user_id
+        ).first()
+    except ValueError:
+        # If not an integer, treat as slug
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == user_id
+        ).first()
+    
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
+        )
+    
+    return shop
+
 @router.post("/shops/", response_model=schemas.ShopResponse)
 def create_shop(
     shop_in: schemas.ShopCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    print("shop_in")
-    print(shop_in)
-    """Create a new shop with operating hours"""
-    new_shop = models.Shop(
+    """Create a new shop."""
+    # Check if the user is already the owner of 10 shops
+    existing_shops_count = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).count()
+    if existing_shops_count >= 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot create more than 10 shops."
+        )
+
+    # Generate slug if not provided
+    if not shop_in.slug:
+        base_slug = schemas.generate_slug(shop_in.name)
+        slug = base_slug
+        counter = 1
+        
+        # Check if slug exists and create a unique one if needed
+        while db.query(models.Shop).filter(models.Shop.slug == slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+    else:
+        # If slug is provided, ensure it's properly formatted
+        slug = schemas.generate_slug(shop_in.slug)
+        
+        # Check if the slug already exists
+        existing_shop = db.query(models.Shop).filter(models.Shop.slug == slug).first()
+        if existing_shop:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Shop with slug '{slug}' already exists. Please choose a different name."
+            )
+
+    # Create shop with the generated/validated slug
+    shop = models.Shop(
         name=shop_in.name,
+        slug=slug,
         address=shop_in.address,
         city=shop_in.city,
         state=shop_in.state,
@@ -46,14 +100,38 @@ def create_shop(
         owner_id=current_user.id,
         opening_time=shop_in.opening_time,
         closing_time=shop_in.closing_time,
-        average_wait_time=shop_in.average_wait_time or 0.0,
+        average_wait_time=shop_in.average_wait_time,
     )
-    print("new_shop")
-    print(new_shop)
-    db.add(new_shop)
+    db.add(shop)
+    db.flush()  # Flush to get the shop ID without committing the transaction
+
+    # Create operating hours
+    if shop_in.operating_hours:
+        for hours in shop_in.operating_hours:
+            operating_hours = models.ShopOperatingHours(
+                shop_id=shop.id,
+                day_of_week=hours.day_of_week,
+                opening_time=hours.opening_time,
+                closing_time=hours.closing_time,
+                is_closed=hours.is_closed
+            )
+            db.add(operating_hours)
+    else:
+        # Create default operating hours (open every day with shop's default hours)
+        for day in range(7):
+            operating_hours = models.ShopOperatingHours(
+                shop_id=shop.id,
+                day_of_week=day,
+                opening_time=shop_in.opening_time,
+                closing_time=shop_in.closing_time,
+                is_closed=False
+            )
+            db.add(operating_hours)
+
     db.commit()
-    db.refresh(new_shop)
-    return new_shop
+    db.refresh(shop)
+    
+    return shop
 
 @router.get("/shops/", response_model=List[schemas.ShopResponse])
 async def get_my_shops(
@@ -90,148 +168,225 @@ async def get_my_shops_no_slash(
     """Get all shops owned by the current user (no trailing slash version)"""
     return await get_my_shops(db=db, current_user=current_user)
 
-@router.get("/shops/{shop_id}", response_model=schemas.ShopResponse)
+@router.get("/shops/{shop_id_or_slug}", response_model=schemas.ShopResponse)
 def get_shop_by_id(
-    shop_id: int,
+    shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Get a specific shop by ID with operating status"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
+    """Get shop details by ID or slug."""
+    # Try to parse as integer (shop_id)
+    try:
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).options(
+            joinedload(models.Shop.operating_hours)
+        ).first()
+    except ValueError:
+        # If not an integer, treat as slug
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == current_user.id
+        ).options(
+            joinedload(models.Shop.operating_hours)
+        ).first()
+
     if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    
-    # Add computed fields
-    shop.is_open = is_shop_open(shop)
-    shop.estimated_wait_time = calculate_wait_time(db, shop.id)
-    shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
+        )
+
     return shop
 
-@router.put("/shops/{shop_id}", response_model=schemas.ShopResponse)
+@router.put("/shops/{shop_id_or_slug}", response_model=schemas.ShopResponse)
 def update_shop(
-    shop_id: int,
+    shop_id_or_slug: str,
     shop_in: schemas.ShopUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Update shop details including operating hours"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    
-    # Convert input model to dict, excluding None values
-    update_data = shop_in.model_dump(exclude_unset=True)
-    
-    # Handle time fields separately to ensure proper validation
-    time_fields = {'opening_time', 'closing_time'}
-    regular_fields = {k: v for k, v in update_data.items() if k not in time_fields}
-    
-    # Update regular fields
-    for field, value in regular_fields.items():
-        if field in ['has_advertisement', 'advertisement_image_url', 'advertisement_start_date', 'advertisement_end_date']:
-            if not shop.has_advertisement:
-                shop.advertisement_image_url = None
-                shop.advertisement_start_date = None
-                shop.advertisement_end_date = None
-                shop.is_advertisement_active = False
-            elif shop.has_advertisement and not shop.advertisement_image_url:
-                shop.has_advertisement = False
-                shop.is_advertisement_active = False
-        else:
-            setattr(shop, field, value)
-    
-    # Handle time fields with validation
-    if 'opening_time' in update_data or 'closing_time' in update_data:
-        new_opening_time = update_data.get('opening_time', shop.opening_time)
-        new_closing_time = update_data.get('closing_time', shop.closing_time)
-        
-        # Update the time fields
-        shop.opening_time = new_opening_time
-        shop.closing_time = new_closing_time
-        
-        logger.debug(
-            f"Updated shop hours - Opening: {format_time(new_opening_time)}, "
-            f"Closing: {format_time(new_closing_time)}"
-        )
-    
+    """Update shop details by ID or slug."""
+    # Try to parse as integer (shop_id)
     try:
-        db.add(shop)
-        db.commit()
-        db.refresh(shop)
-        
-        # Add computed fields
-        shop.is_open = is_shop_open(shop)
-        shop.estimated_wait_time = calculate_wait_time(db, shop.id)
-        shop.formatted_hours = f"{format_time(shop.opening_time)} - {format_time(shop.closing_time)}"
-        
-        return shop
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error updating shop: {str(e)}")
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    except ValueError:
+        # If not an integer, treat as slug
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == current_user.id
+        ).first()
+
+    if not shop:
         raise HTTPException(
-            status_code=500,
-            detail="An error occurred while updating the shop"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
         )
 
-@router.delete("/shops/{shop_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_shop(
-    shop_id: int,
+    # Handle slug update if provided
+    if shop_in.slug is not None:
+        new_slug = schemas.generate_slug(shop_in.slug)
+        
+        # Check if new slug already exists (and isn't the current shop's slug)
+        existing_shop = db.query(models.Shop).filter(
+            models.Shop.slug == new_slug,
+            models.Shop.id != shop.id
+        ).first()
+        
+        if existing_shop:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Shop with slug '{new_slug}' already exists"
+            )
+        
+        shop.slug = new_slug
+
+    # Update other fields
+    update_data = shop_in.model_dump(exclude_unset=True, exclude={"slug"})
+    
+    for key, value in update_data.items():
+        setattr(shop, key, value)
+    
+    db.commit()
+    db.refresh(shop)
+    
+    return shop
+
+@router.post("/shops/{shop_id_or_slug}/operating-hours", response_model=schemas.ShopOperatingHoursResponse)
+def create_operating_hours(
+    shop_id_or_slug: str,
+    hours_in: schemas.ShopOperatingHoursCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Delete a shop and all its related data"""
-    # Verify shop ownership
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
+    """Create or update operating hours for a specific day."""
+    # Find shop by ID or slug
+    try:
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    except ValueError:
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == current_user.id
+        ).first()
     
     if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    
-    try:
-        # Delete advertisement image if exists
-        if shop.advertisement_image_url:
-            file_path = os.path.join("static", shop.advertisement_image_url.lstrip('/'))
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        
-        # Delete the shop (cascading will handle related records)
-        db.delete(shop)
-        db.commit()
-        return
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error deleting shop: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail="An error occurred while deleting the shop"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
         )
+    
+    # Check if operating hours already exist for this day
+    existing_hours = db.query(models.ShopOperatingHours).filter(
+        models.ShopOperatingHours.shop_id == shop.id,
+        models.ShopOperatingHours.day_of_week == hours_in.day_of_week
+    ).first()
+    
+    if existing_hours:
+        # Update existing hours
+        for key, value in hours_in.model_dump().items():
+            setattr(existing_hours, key, value)
+        db.commit()
+        db.refresh(existing_hours)
+        return existing_hours
+    
+    # Create new operating hours
+    operating_hours = models.ShopOperatingHours(
+        shop_id=shop.id,
+        day_of_week=hours_in.day_of_week,
+        opening_time=hours_in.opening_time,
+        closing_time=hours_in.closing_time,
+        is_closed=hours_in.is_closed
+    )
+    
+    db.add(operating_hours)
+    db.commit()
+    db.refresh(operating_hours)
+    
+    return operating_hours
 
+@router.get("/shops/{shop_id_or_slug}/operating-hours", response_model=List[schemas.ShopOperatingHoursResponse])
+def get_operating_hours(
+    shop_id_or_slug: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Get operating hours for a shop."""
+    # Find shop by ID or slug
+    try:
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    except ValueError:
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
+        )
+    
+    operating_hours = db.query(models.ShopOperatingHours).filter(
+        models.ShopOperatingHours.shop_id == shop.id
+    ).all()
+    
+    return operating_hours
 
-@router.post("/shops/{shop_id}/barbers/", response_model=schemas.BarberResponse)
+@router.delete("/shops/{shop_id_or_slug}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_shop(
+    shop_id_or_slug: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Delete a shop by ID or slug."""
+    # Find shop by ID or slug
+    try:
+        shop_id = int(shop_id_or_slug)
+        shop = db.query(models.Shop).filter(
+            models.Shop.id == shop_id,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    except ValueError:
+        shop = db.query(models.Shop).filter(
+            models.Shop.slug == shop_id_or_slug,
+            models.Shop.owner_id == current_user.id
+        ).first()
+    
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found"
+        )
+    
+    db.delete(shop)
+    db.commit()
+    
+    return {"ok": True}
+
+@router.post("/shops/{shop_id_or_slug}/barbers/", response_model=schemas.BarberResponse)
 def add_barber(
-    shop_id: int,
+    shop_id_or_slug: str,
     barber_in: schemas.BarberCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    """Add a new barber to a shop."""
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     # Check if a user with the same email exists
     user_by_email = db.query(models.User).filter(models.User.email == barber_in.email).first()
     
@@ -277,7 +432,7 @@ def add_barber(
                 # Check if they're already a barber for this shop
                 existing_barber = db.query(models.Barber).filter(
                     models.Barber.user_id == user.id,
-                    models.Barber.shop_id == shop_id
+                    models.Barber.shop_id == shop.id
                 ).first()
                 
                 if existing_barber:
@@ -352,9 +507,9 @@ def add_barber(
         )
 
 
-@router.put("/shops/{shop_id}/barbers/{barber_id}", response_model=schemas.BarberResponse)
+@router.put("/shops/{shop_id_or_slug}/barbers/{barber_id}", response_model=schemas.BarberResponse)
 def update_barber(
-    shop_id: int,
+    shop_id_or_slug: str,
     barber_id: int,
     barber_in: schemas.BarberUpdate,
     db: Session = Depends(get_db),
@@ -363,15 +518,10 @@ def update_barber(
     """Update barber details"""
     try:
         # First, verify shop ownership
-        shop = db.query(models.Shop).filter(
-            models.Shop.id == shop_id,
-            models.Shop.owner_id == current_user.id
-        ).first()
-        if not shop:
-            raise HTTPException(status_code=404, detail="Shop not found")
-
+        shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+        
         # Add logging to debug the query
-        logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id}")
+        logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id_or_slug}")
         
         # Get barber with a join to ensure we have all related data
         barber = (
@@ -379,7 +529,7 @@ def update_barber(
             .join(models.User)
             .filter(
                 models.Barber.id == barber_id,
-                models.Barber.shop_id == shop_id
+                models.Barber.shop_id == shop.id
             )
             .first()
         )
@@ -391,10 +541,10 @@ def update_barber(
             # Add more detailed error information
             existing_barber = db.query(models.Barber).filter(models.Barber.id == barber_id).first()
             if existing_barber:
-                logger.error(f"Barber exists but in different shop. Barber shop_id: {existing_barber.shop_id}, Requested shop_id: {shop_id}")
+                logger.error(f"Barber exists but in different shop. Barber shop_id: {existing_barber.shop_id}, Requested shop_id: {shop_id_or_slug}")
                 raise HTTPException(
                     status_code=404, 
-                    detail=f"Barber with ID {barber_id} not found in shop {shop_id}"
+                    detail=f"Barber with ID {barber_id} not found in shop {shop_id_or_slug}"
                 )
             raise HTTPException(status_code=404, detail="Barber not found")
 
@@ -452,7 +602,7 @@ def update_barber(
         response_data = {
             "id": barber.id,
             "user_id": user.id,
-            "shop_id": shop_id,
+            "shop_id": shop.id,
             "status": barber.status,
             "full_name": user.full_name,
             "email": user.email,
@@ -495,33 +645,28 @@ def update_barber(
         )
 
 # Add duplicate route with trailing slash to prevent URL mismatch issues
-@router.put("/shops/{shop_id}/barbers/{barber_id}/", response_model=schemas.BarberResponse)
+@router.put("/shops/{shop_id_or_slug}/barbers/{barber_id}/", response_model=schemas.BarberResponse)
 def update_barber_with_slash(
-    shop_id: int,
+    shop_id_or_slug: str,
     barber_id: int,
     barber_in: schemas.BarberUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route with trailing slash to ensure URL matching"""
-    return update_barber(shop_id, barber_id, barber_in, db, current_user)
+    return update_barber(shop_id_or_slug, barber_id, barber_in, db, current_user)
 
 
-@router.patch("/shops/{shop_id}/barbers/{barber_id}/status", response_model=schemas.BarberResponse)
+@router.patch("/shops/{shop_id_or_slug}/barbers/{barber_id}/status", response_model=schemas.BarberResponse)
 def update_barber_status(
-    shop_id: int,
+    shop_id_or_slug: str,
     barber_id: int,
     status: models.BarberStatus,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Update barber status only"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
 
     # Join with User table to get all required information
     barber = (
@@ -556,19 +701,15 @@ def update_barber_status(
     return response_data
 
 
-@router.get("/shops/{shop_id}/barbers/", response_model=List[schemas.BarberResponse])
+@router.get("/shops/{shop_id_or_slug}/barbers/", response_model=List[schemas.BarberResponse])
 def get_barbers(
-    shop_id: int,
+    shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    """Get all barbers for a shop."""
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     # Join with User table and load services relationship
     barbers = (
         db.query(models.Barber)
@@ -606,14 +747,15 @@ def get_barbers(
     return barber_responses
 
 
-@router.delete("/shops/barbers/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shops/{shop_id_or_slug}/barbers/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_barber(
+    shop_id_or_slug: str,
     barber_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     try:
-        shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
+        shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
         if not shop:
             raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -655,31 +797,26 @@ def remove_barber(
         )
 
 # Add a duplicate route with trailing slash
-@router.delete("/shops/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shops/{shop_id_or_slug}/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
 def remove_barber_with_slash(
+    shop_id_or_slug: str,
     barber_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route with trailing slash to ensure URL matching"""
-    return remove_barber(barber_id, db, current_user)
+    return remove_barber(shop_id_or_slug, barber_id, db, current_user)
 
-
-@router.post("/shops/{shop_id}/services/", response_model=schemas.ServiceResponse)
+@router.post("/shops/{shop_id_or_slug}/services/", response_model=schemas.ServiceResponse)
 def create_service(
-    shop_id: int,
+    shop_id_or_slug: str,
     service_in: schemas.ServiceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Create a new service for a shop"""
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    """Create a new service for a shop."""
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     new_service = models.Service(
         name=service_in.name,
         duration=service_in.duration,
@@ -692,47 +829,37 @@ def create_service(
     return new_service
 
 
-@router.get("/shops/{shop_id}/services/", response_model=List[schemas.ServiceResponse])
+@router.get("/shops/{shop_id_or_slug}/services/", response_model=List[schemas.ServiceResponse])
 def get_services(
-    shop_id: int,
+    shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     services = db.query(models.Service).filter(models.Service.shop_id == shop.id).all()
     return services
 
 # Add duplicate route without trailing slash to ensure URL matching
-@router.get("/shops/{shop_id}/services", response_model=List[schemas.ServiceResponse])
+@router.get("/shops/{shop_id_or_slug}/services", response_model=List[schemas.ServiceResponse])
 def get_services_no_slash(
-    shop_id: int,
+    shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route without trailing slash to ensure URL matching"""
-    return get_services(shop_id, db, current_user)
+    return get_services(shop_id_or_slug, db, current_user)
 
-@router.put("/shops/{shop_id}/services/{service_id}", response_model=schemas.ServiceResponse)
+@router.put("/shops/{shop_id_or_slug}/services/{service_id}", response_model=schemas.ServiceResponse)
 def update_service(
-    shop_id: int,
+    shop_id_or_slug: str,
     service_id: int,
     service_in: schemas.ServiceUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(
-        models.Shop.id == shop_id,
-        models.Shop.owner_id == current_user.id
-    ).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     service = db.query(models.Service).filter(
         models.Service.id == service_id,
         models.Service.shop_id == shop.id
@@ -749,16 +876,15 @@ def update_service(
     return service
 
 
-@router.delete("/shops/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shops/{shop_id_or_slug}/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_service(
+    shop_id_or_slug: str,
     service_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    
     service = db.query(models.Service).filter(
         models.Service.id == service_id,
         models.Service.shop_id == shop.id

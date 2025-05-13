@@ -100,6 +100,7 @@ class Shop(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
     address = Column(String, nullable=False)
     city = Column(String, nullable=False)
     state = Column(String, nullable=False)
@@ -133,6 +134,27 @@ class Shop(Base):
     )
     feedbacks = relationship(
         "Feedback", back_populates="shop", cascade="all, delete-orphan"
+    )
+    operating_hours = relationship(
+        "ShopOperatingHours", back_populates="shop", cascade="all, delete-orphan"
+    )
+
+
+class ShopOperatingHours(Base):
+    __tablename__ = "shop_operating_hours"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
+    opening_time = Column(Time, nullable=True)  # Null if closed that day
+    closing_time = Column(Time, nullable=True)  # Null if closed that day
+    is_closed = Column(Boolean, default=False)
+    
+    # Relationship
+    shop = relationship("Shop", back_populates="operating_hours")
+    
+    __table_args__ = (
+        UniqueConstraint('shop_id', 'day_of_week', name='uix_shop_day'),
     )
 
 
@@ -199,6 +221,8 @@ class Appointment(Base):
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True, index=True)
     number_of_people = Column(Integer, default=1)
+    custom_duration = Column(Integer, nullable=True)  # In minutes, overrides service duration
+    custom_price = Column(Float, nullable=True)  # Overrides default service price
 
     # Relationships
     user = relationship("User", back_populates="appointments")
@@ -247,6 +271,8 @@ class QueueEntry(Base):
     arrival_confirmed = Column(Boolean, default=False)
     service_start_time = Column(DateTime, nullable=True)
     service_end_time = Column(DateTime, nullable=True)
+    custom_duration = Column(Integer, nullable=True)  # In minutes, overrides service duration
+    custom_price = Column(Float, nullable=True)  # Overrides default service price
 
     # Relationships
     shop = relationship("Shop", back_populates="queue_entries")

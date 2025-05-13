@@ -6,6 +6,7 @@ from app.models import AppointmentStatus, BarberStatus, QueueStatus
 from enum import Enum
 from datetime import datetime, timezone, time
 import pytz
+import re
 
 # At the top of the file, add these imports
 TIMEZONE = pytz.timezone('America/Los_Angeles')
@@ -27,6 +28,18 @@ def convert_to_utc(dt: datetime) -> datetime:
     else:
         pacific_dt = dt.astimezone(TIMEZONE)
     return pacific_dt.astimezone(timezone.utc)
+
+def generate_slug(name: str) -> str:
+    """Generate a URL-friendly slug from a string"""
+    # Convert to lowercase and replace spaces with hyphens
+    slug = name.lower().replace(' ', '-')
+    # Remove special characters
+    slug = re.sub(r'[^a-z0-9-]', '', slug)
+    # Remove duplicate hyphens
+    slug = re.sub(r'-+', '-', slug)
+    # Remove leading/trailing hyphens
+    slug = slug.strip('-')
+    return slug
 
 class UserRole(str, Enum):
     user = "USER"
@@ -123,6 +136,34 @@ class AppointmentResponse(AppointmentBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ShopOperatingHoursBase(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6, description="0=Sunday, 1=Monday, ..., 6=Saturday")
+    opening_time: Optional[time] = None
+    closing_time: Optional[time] = None
+    is_closed: bool = False
+
+class ShopOperatingHoursCreate(ShopOperatingHoursBase):
+    pass
+
+class ShopOperatingHoursResponse(ShopOperatingHoursBase):
+    id: int
+    shop_id: int
+    
+    model_config = ConfigDict(from_attributes=True)
+    
+    @computed_field
+    def day_name(self) -> str:
+        days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        return days[self.day_of_week]
+    
+    @computed_field
+    def formatted_hours(self) -> str:
+        if self.is_closed:
+            return "Closed"
+        if not self.opening_time or not self.closing_time:
+            return "Closed"
+        return f"{self.opening_time.strftime('%I:%M %p')} - {self.closing_time.strftime('%I:%M %p')}"
+
 class ShopBase(BaseModel):
     id: int
     name: str
@@ -143,6 +184,7 @@ class ShopBase(BaseModel):
     estimated_wait_time: Optional[int] = None
     is_open: Optional[bool] = None
     formatted_hours: Optional[str] = None
+    slug: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -157,6 +199,8 @@ class ShopCreate(BaseModel):
     opening_time: time
     closing_time: time
     average_wait_time: Optional[float] = 0.0
+    operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
+    slug: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -176,6 +220,7 @@ class ShopUpdate(BaseModel):
     advertisement_start_date: Optional[datetime] = None
     advertisement_end_date: Optional[datetime] = None
     is_advertisement_active: Optional[bool] = None
+    slug: Optional[str] = None
 
     # Add validator for dates
     @field_validator('advertisement_start_date', 'advertisement_end_date')
@@ -189,6 +234,7 @@ class ShopUpdate(BaseModel):
 class ShopResponse(ShopBase):
     id: int
     owner_id: int
+    operating_hours: List[ShopOperatingHoursResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
