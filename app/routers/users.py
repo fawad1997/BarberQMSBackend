@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import get_db
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.core.dependencies import get_current_active_user
-from typing import List
+from typing import List, Optional
 from app.models import UserRole
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -59,3 +60,68 @@ def update_current_user(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+# Profile update request model
+class ProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+# Add profile update endpoint
+@router.put("/profile", response_model=dict)
+async def update_user_profile(
+    request: ProfileUpdateRequest,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    # Get the current user from the database
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if this is a password update request
+    if request.current_password and request.new_password:
+        # Verify current password
+        if not verify_password(request.current_password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect"
+            )
+        
+        # Password policy check
+        if len(request.new_password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="New password must be at least 8 characters long"
+            )
+        
+        # Update password
+        user.hashed_password = get_password_hash(request.new_password)
+    
+    # Name update
+    if request.name:
+        # Validate name
+        if len(request.name) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Name must be at least 2 characters long"
+            )
+        
+        # Update name in both user and current_user objects
+        user.full_name = request.name
+        current_user.full_name = request.name
+    
+    # Save changes
+    db.commit()
+    db.refresh(user)
+    
+    # Return updated user info with additional fields to help frontend
+    return {
+        "id": user.id,
+        "name": user.full_name,
+        "email": user.email,
+        "updated": True
+    }
