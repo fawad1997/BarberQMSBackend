@@ -15,6 +15,7 @@ from app.models import BarberStatus, AppointmentStatus, QueueStatus
 from app.models import UserRole
 from app.websockets.utils import broadcast_queue_update
 from app.websockets.manager import manager
+from app.utils.schedule_utils import get_recurring_instances, check_schedule_conflicts, ensure_timezone_aware
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -30,12 +31,7 @@ async def create_appointment(
         raise HTTPException(status_code=404, detail="Shop not found")
 
     # Check if shop is open at appointment time
-    appointment_time = appointment_in.appointment_time
-    weekday = appointment_time.weekday()
-    # Adjust for Python's weekday (0 is Monday) vs our model (0 is Sunday)
-    day_of_week = (weekday + 1) % 7
-    
-    # Convert appointment time to time object for comparison
+    appointment_time = ensure_timezone_aware(appointment_in.appointment_time)
     appt_time = appointment_time.time()
     
     # Skip time validation for 24-hour shops
@@ -67,66 +63,73 @@ async def create_appointment(
         if not barber:
             raise HTTPException(status_code=404, detail="Barber not found")
         
-        # Check barber schedule for the day
-        schedule = db.query(models.BarberSchedule).filter(
-            models.BarberSchedule.barber_id == barber.id,
-            models.BarberSchedule.day_of_week == day_of_week
-        ).first()
+        # Check if barber has any schedule that covers the appointment time
+        barber_schedules = db.query(models.BarberSchedule).filter(
+            models.BarberSchedule.barber_id == barber.id
+        ).all()
         
-        if not schedule:
-            raise HTTPException(status_code=400, detail="Barber is not scheduled to work on this day")
+        is_scheduled = False
+        for schedule in barber_schedules:
+            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+            for instance in instances:
+                if (instance["start_datetime"] <= appointment_time and 
+                    instance["end_datetime"] >= appointment_end_time):
+                    is_scheduled = True
+                    break
+            if is_scheduled:
+                break
         
-        # Check if appointment time is within barber's working hours
-        if not (schedule.start_time <= appt_time <= schedule.end_time):
-            raise HTTPException(status_code=400, detail="Appointment time is outside barber's working hours")
+        if not is_scheduled:
+            raise HTTPException(status_code=400, detail="Barber is not scheduled to work at this time")
         
         # Check for conflicting appointments
         conflicting_appointments = db.query(models.Appointment).filter(
             models.Appointment.barber_id == barber.id,
             models.Appointment.status == models.AppointmentStatus.SCHEDULED,
             models.Appointment.appointment_time < appointment_end_time,
-            appointment_time < models.Appointment.appointment_time + func.cast(
-                func.concat(str(service_duration), ' minutes'), Interval
-            )
+            appointment_time < models.Appointment.end_time
         ).all()
         
         if conflicting_appointments:
             raise HTTPException(status_code=400, detail="Barber has conflicting appointments")
         
-        # All checks passed, assign this barber
         selected_barber_id = barber.id
     else:
-        # No specific barber requested, find available barbers
+        # Find available barbers at the requested time
         available_barbers = []
-        
-        # Get all barbers working at the shop
         barbers = db.query(models.Barber).filter(
             models.Barber.shop_id == appointment_in.shop_id,
-            models.Barber.status.in_([models.BarberStatus.AVAILABLE, models.BarberStatus.ON_BREAK])
+            models.Barber.status == models.BarberStatus.AVAILABLE
         ).all()
         
         for barber in barbers:
-            # Check barber schedule
-            schedule = db.query(models.BarberSchedule).filter(
-                models.BarberSchedule.barber_id == barber.id,
-                models.BarberSchedule.day_of_week == day_of_week
-            ).first()
-            
-            if not schedule or not (schedule.start_time <= appt_time <= schedule.end_time):
-                continue
-            
-            # Check for conflicting appointments
-            conflicting_appointments = db.query(models.Appointment).filter(
-                models.Appointment.barber_id == barber.id,
-                models.Appointment.status == models.AppointmentStatus.SCHEDULED,
-                models.Appointment.appointment_time < appointment_end_time,
-                appointment_time < models.Appointment.appointment_time + func.cast(
-                    func.concat(str(service_duration), ' minutes'), Interval
-                )
+            # Check if barber has any schedule that covers the appointment time
+            barber_schedules = db.query(models.BarberSchedule).filter(
+                models.BarberSchedule.barber_id == barber.id
             ).all()
             
-            if not conflicting_appointments:
-                available_barbers.append(barber)
+            is_scheduled = False
+            for schedule in barber_schedules:
+                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+                for instance in instances:
+                    if (instance["start_datetime"] <= appointment_time and 
+                        instance["end_datetime"] >= appointment_end_time):
+                        is_scheduled = True
+                        break
+                if is_scheduled:
+                    break
+            
+            if is_scheduled:
+                # Check for conflicting appointments
+                conflicting_appointments = db.query(models.Appointment).filter(
+                    models.Appointment.barber_id == barber.id,
+                    models.Appointment.status == models.AppointmentStatus.SCHEDULED,
+                    models.Appointment.appointment_time < appointment_end_time,
+                    appointment_time < models.Appointment.end_time
+                ).all()
+                
+                if not conflicting_appointments:
+                    available_barbers.append(barber)
         
         if not available_barbers:
             raise HTTPException(status_code=400, detail="No barbers available at the requested time")
@@ -149,6 +152,7 @@ async def create_appointment(
         barber_id=selected_barber_id,
         service_id = None if (val := getattr(appointment_in, 'service_id', None)) == 0 else val,
         appointment_time=appointment_time,
+        end_time=appointment_end_time,
         status=models.AppointmentStatus.SCHEDULED,
         number_of_people=appointment_in.number_of_people,
         user_id = None if (val := getattr(appointment_in, 'user_id', None)) == 0 else val,
@@ -179,15 +183,11 @@ async def create_appointment(
         .first()
     )
     
-    # Prepare response with nested objects for barber and service
     if new_appointment.barber:
         # Ensure user data is available
         new_appointment.barber.full_name = new_appointment.barber.user.full_name
         new_appointment.barber.email = new_appointment.barber.user.email
         new_appointment.barber.phone_number = new_appointment.barber.user.phone_number
-    
-    # Broadcast queue update via WebSocket
-    asyncio.create_task(broadcast_queue_update(db, appointment_in.shop_id, manager))
     
     return new_appointment
 
@@ -738,9 +738,7 @@ async def update_appointment(
 
     # If updating appointment time
     if appointment_update.appointment_time:
-        appointment_time = appointment_update.appointment_time
-        weekday = appointment_time.weekday()
-        day_of_week = (weekday + 1) % 7
+        appointment_time = ensure_timezone_aware(appointment_update.appointment_time)
         appt_time = appointment_time.time()
         
         # Skip time validation for 24-hour shops
@@ -772,17 +770,24 @@ async def update_appointment(
             if not barber:
                 raise HTTPException(status_code=404, detail="Barber not found")
             
-            # Check barber schedule
-            schedule = db.query(models.BarberSchedule).filter(
-                models.BarberSchedule.barber_id == barber.id,
-                models.BarberSchedule.day_of_week == day_of_week
-            ).first()
+            # Check if barber has any schedule that covers the appointment time
+            barber_schedules = db.query(models.BarberSchedule).filter(
+                models.BarberSchedule.barber_id == barber.id
+            ).all()
             
-            if not schedule:
-                raise HTTPException(status_code=400, detail="Barber is not scheduled to work on this day")
+            is_scheduled = False
+            for schedule in barber_schedules:
+                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+                for instance in instances:
+                    if (instance["start_datetime"] <= appointment_time and 
+                        instance["end_datetime"] >= appointment_end_time):
+                        is_scheduled = True
+                        break
+                if is_scheduled:
+                    break
             
-            if not (schedule.start_time <= appt_time <= schedule.end_time):
-                raise HTTPException(status_code=400, detail="Appointment time is outside barber's working hours")
+            if not is_scheduled:
+                raise HTTPException(status_code=400, detail="Barber is not scheduled to work at this time")
             
             # Check for conflicting appointments (excluding current appointment)
             conflicting_appointments = db.query(models.Appointment).filter(
@@ -790,9 +795,7 @@ async def update_appointment(
                 models.Appointment.status == models.AppointmentStatus.SCHEDULED,
                 models.Appointment.id != appointment_id,
                 models.Appointment.appointment_time < appointment_end_time,
-                appointment_time < models.Appointment.appointment_time + func.cast(
-                    func.concat(str(service_duration), ' minutes'), Interval
-                )
+                appointment_time < models.Appointment.end_time
             ).all()
             
             if conflicting_appointments:
@@ -800,13 +803,13 @@ async def update_appointment(
 
         # Update appointment fields
         appointment.appointment_time = appointment_time
+        appointment.end_time = appointment_end_time
+
     # If not updating appointment time but updating barber, check if the barber is available at the existing time
     elif appointment_update.barber_id is not None and appointment_update.barber_id != appointment.barber_id:
         # Get the existing appointment time
         appointment_time = appointment.appointment_time
-        weekday = appointment_time.weekday()
-        day_of_week = (weekday + 1) % 7
-        appt_time = appointment_time.time()
+        appointment_end_time = appointment.end_time
         
         # Get the barber
         barber = db.query(models.Barber).filter(
@@ -817,30 +820,24 @@ async def update_appointment(
         if not barber:
             raise HTTPException(status_code=404, detail="Barber not found")
         
-        # Check barber schedule
-        schedule = db.query(models.BarberSchedule).filter(
-            models.BarberSchedule.barber_id == barber.id,
-            models.BarberSchedule.day_of_week == day_of_week
-        ).first()
+        # Check if barber has any schedule that covers the appointment time
+        barber_schedules = db.query(models.BarberSchedule).filter(
+            models.BarberSchedule.barber_id == barber.id
+        ).all()
         
-        if not schedule:
-            raise HTTPException(status_code=400, detail="Barber is not scheduled to work on this day")
+        is_scheduled = False
+        for schedule in barber_schedules:
+            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+            for instance in instances:
+                if (instance["start_datetime"] <= appointment_time and 
+                    instance["end_datetime"] >= appointment_end_time):
+                    is_scheduled = True
+                    break
+            if is_scheduled:
+                break
         
-        if not (schedule.start_time <= appt_time <= schedule.end_time):
-            raise HTTPException(status_code=400, detail="Appointment time is outside barber's working hours")
-        
-        # Get service duration
-        service_duration = 30  # Default duration
-        service_id = appointment_update.service_id or appointment.service_id
-        if service_id:
-            service = db.query(models.Service).filter(
-                models.Service.id == service_id,
-                models.Service.shop_id == appointment.shop_id
-            ).first()
-            if service:
-                service_duration = service.duration
-        
-        appointment_end_time = appointment_time + timedelta(minutes=service_duration)
+        if not is_scheduled:
+            raise HTTPException(status_code=400, detail="Barber is not scheduled to work at this time")
         
         # Check for conflicting appointments (excluding current appointment)
         conflicting_appointments = db.query(models.Appointment).filter(
@@ -848,9 +845,7 @@ async def update_appointment(
             models.Appointment.status == models.AppointmentStatus.SCHEDULED,
             models.Appointment.id != appointment_id,
             models.Appointment.appointment_time < appointment_end_time,
-            appointment_time < models.Appointment.appointment_time + func.cast(
-                func.concat(str(service_duration), ' minutes'), Interval
-            )
+            appointment_time < models.Appointment.end_time
         ).all()
         
         if conflicting_appointments:
@@ -859,31 +854,18 @@ async def update_appointment(
     # Update other fields if provided
     if appointment_update.barber_id is not None:
         appointment.barber_id = appointment_update.barber_id
-    
-    # Fix for service_id update - properly handle None values
     if appointment_update.service_id is not None:
-        # If service_id is 0, set it to None, otherwise use the provided value
-        appointment.service_id = None if appointment_update.service_id == 0 else appointment_update.service_id
-    
+        appointment.service_id = appointment_update.service_id
     if appointment_update.number_of_people is not None:
         appointment.number_of_people = appointment_update.number_of_people
-    
     if appointment_update.full_name is not None:
         appointment.full_name = appointment_update.full_name
-    
     if appointment_update.phone_number is not None:
-        # Validate phone number format
-        if not appointment_update.phone_number.strip():
-            raise HTTPException(status_code=400, detail="Phone number cannot be empty")
         appointment.phone_number = appointment_update.phone_number
 
-    try:
-        db.commit()
-        db.refresh(appointment)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
+    db.commit()
+    db.refresh(appointment)
+    
     # Load related entities for response
     appointment = (
         db.query(models.Appointment)
@@ -892,14 +874,14 @@ async def update_appointment(
             joinedload(models.Appointment.service),
             joinedload(models.Appointment.user)
         )
-        .filter(models.Appointment.id == appointment_id)
+        .filter(models.Appointment.id == appointment.id)
         .first()
     )
-
-    # Prepare response with nested objects
+    
     if appointment.barber:
+        # Ensure user data is available
         appointment.barber.full_name = appointment.barber.user.full_name
         appointment.barber.email = appointment.barber.user.email
         appointment.barber.phone_number = appointment.barber.user.phone_number
-
+    
     return appointment

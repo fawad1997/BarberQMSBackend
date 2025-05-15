@@ -68,33 +68,18 @@ def get_recurring_instances(
                 })
             current += interval
             
-    elif schedule.repeat_frequency == ScheduleRepeatFrequency.MONTHLY:
-        # For monthly, we'll keep the same day of the month
+    elif schedule.repeat_frequency == ScheduleRepeatFrequency.WEEKLY_NO_WEEKENDS:
         current = schedule_start
         while current <= end_date:
-            if current >= start_date:
-                instance_end = current + duration
-                instances.append({
-                    "start_datetime": current,
-                    "end_datetime": instance_end
-                })
-            # Move to next month
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1)
-            else:
-                current = current.replace(month=current.month + 1)
-                
-    elif schedule.repeat_frequency == ScheduleRepeatFrequency.YEARLY:
-        # For yearly, we'll keep the same month and day
-        current = schedule_start
-        while current <= end_date:
-            if current >= start_date:
-                instance_end = current + duration
-                instances.append({
-                    "start_datetime": current,
-                    "end_datetime": instance_end
-                })
-            current = current.replace(year=current.year + 1)
+            # Skip weekends (5 = Saturday, 6 = Sunday)
+            if current.weekday() < 5:  # Only process weekdays (0-4)
+                if current >= start_date:
+                    instance_end = current + duration
+                    instances.append({
+                        "start_datetime": current,
+                        "end_datetime": instance_end
+                    })
+            current += timedelta(days=1)
 
     return instances
 

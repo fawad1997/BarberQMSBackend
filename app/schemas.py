@@ -518,20 +518,25 @@ class FeedbackResponse(FeedbackBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopDetailedBarberSchedule(BarberScheduleResponseLegacy):
-    day_name: str = ""
-
+class ShopDetailedBarberSchedule(BarberScheduleResponse):
     @computed_field
     def formatted_time(self) -> str:
         # Convert times to Pacific timezone for display
-        start = datetime.combine(datetime.today(), self.start_time)
-        end = datetime.combine(datetime.today(), self.end_time)
+        start = self.start_date
+        end = self.end_date
         
-        # Localize to Pacific time
-        start = TIMEZONE.localize(start)
-        end = TIMEZONE.localize(end)
+        # Ensure times are in Pacific timezone
+        if start.tzinfo is None:
+            start = TIMEZONE.localize(start)
+        if end.tzinfo is None:
+            end = TIMEZONE.localize(end)
         
         return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
+
+    @computed_field
+    def day_name(self) -> str:
+        # Get the day name from the start date
+        return self.start_date.strftime('%A')
 
 class ShopDetailedBarber(BarberResponse):
     schedules: List[ShopDetailedBarberSchedule] = []
