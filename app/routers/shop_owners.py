@@ -379,14 +379,14 @@ def delete_shop(
     return {"ok": True}
 
 @router.post("/shops/{shop_id_or_slug}/barbers/", response_model=schemas.BarberResponse)
-def add_barber(
+async def add_barber(
     shop_id_or_slug: str,
     barber_in: schemas.BarberCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Add a new barber to a shop."""
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     # Check if a user with the same email exists
     user_by_email = db.query(models.User).filter(models.User.email == barber_in.email).first()
@@ -509,7 +509,7 @@ def add_barber(
 
 
 @router.put("/shops/{shop_id_or_slug}/barbers/{barber_id}", response_model=schemas.BarberResponse)
-def update_barber(
+async def update_barber(
     shop_id_or_slug: str,
     barber_id: int,
     barber_in: schemas.BarberUpdate,
@@ -519,7 +519,7 @@ def update_barber(
     """Update barber details"""
     try:
         # First, verify shop ownership
-        shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+        shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
         
         # Add logging to debug the query
         logger.debug(f"Looking for barber with id {barber_id} in shop {shop_id_or_slug}")
@@ -659,7 +659,7 @@ def update_barber_with_slash(
 
 
 @router.patch("/shops/{shop_id_or_slug}/barbers/{barber_id}/status", response_model=schemas.BarberResponse)
-def update_barber_status(
+async def update_barber_status(
     shop_id_or_slug: str,
     barber_id: int,
     status: models.BarberStatus,
@@ -667,7 +667,7 @@ def update_barber_status(
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Update barber status only"""
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
 
     # Join with User table to get all required information
     barber = (
@@ -703,13 +703,13 @@ def update_barber_status(
 
 
 @router.get("/shops/{shop_id_or_slug}/barbers/", response_model=List[schemas.BarberResponse])
-def get_barbers(
+async def get_barbers(
     shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Get all barbers for a shop."""
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     # Join with User table and load services relationship
     barbers = (
@@ -749,14 +749,14 @@ def get_barbers(
 
 
 @router.delete("/shops/{shop_id_or_slug}/barbers/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_barber(
+async def remove_barber(
     shop_id_or_slug: str,
     barber_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     try:
-        shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+        shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
         if not shop:
             raise HTTPException(status_code=404, detail="Shop not found")
 
@@ -799,24 +799,24 @@ def remove_barber(
 
 # Add a duplicate route with trailing slash
 @router.delete("/shops/{shop_id_or_slug}/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
-def remove_barber_with_slash(
+async def remove_barber_with_slash(
     shop_id_or_slug: str,
     barber_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route with trailing slash to ensure URL matching"""
-    return remove_barber(shop_id_or_slug, barber_id, db, current_user)
+    return await remove_barber(shop_id_or_slug, barber_id, db, current_user)
 
 @router.post("/shops/{shop_id_or_slug}/services/", response_model=schemas.ServiceResponse)
-def create_service(
+async def create_service(
     shop_id_or_slug: str,
     service_in: schemas.ServiceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Create a new service for a shop."""
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     new_service = models.Service(
         name=service_in.name,
@@ -831,35 +831,35 @@ def create_service(
 
 
 @router.get("/shops/{shop_id_or_slug}/services/", response_model=List[schemas.ServiceResponse])
-def get_services(
+async def get_services(
     shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     services = db.query(models.Service).filter(models.Service.shop_id == shop.id).all()
     return services
 
 # Add duplicate route without trailing slash to ensure URL matching
 @router.get("/shops/{shop_id_or_slug}/services", response_model=List[schemas.ServiceResponse])
-def get_services_no_slash(
+async def get_services_no_slash(
     shop_id_or_slug: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route without trailing slash to ensure URL matching"""
-    return get_services(shop_id_or_slug, db, current_user)
+    return await get_services(shop_id_or_slug, db, current_user)
 
 @router.put("/shops/{shop_id_or_slug}/services/{service_id}", response_model=schemas.ServiceResponse)
-def update_service(
+async def update_service(
     shop_id_or_slug: str,
     service_id: int,
     service_in: schemas.ServiceUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     service = db.query(models.Service).filter(
         models.Service.id == service_id,
@@ -878,13 +878,13 @@ def update_service(
 
 
 @router.delete("/shops/{shop_id_or_slug}/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_service(
+async def delete_service(
     shop_id_or_slug: str,
     service_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
     
     service = db.query(models.Service).filter(
         models.Service.id == service_id,
