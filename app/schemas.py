@@ -712,3 +712,27 @@ class AppointmentUpdate(BaseModel):
     def validate_guest_fields(cls, v, info):
         # Allow updating individual fields
         return v
+
+# Password Reset Schemas
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8, description="Password must be at least 8 characters long")
+
+class ResetPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ValidateResetTokenRequest(BaseModel):
+    token: str
+
+class ValidateResetTokenResponse(BaseModel):
+    valid: bool
+    message: str
+    user_email: Optional[str] = None

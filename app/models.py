@@ -80,6 +80,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Password reset fields
+    reset_token = Column(String, nullable=True, index=True)
+    reset_token_expires = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     shops = relationship("Shop", back_populates="owner", cascade="all, delete")
