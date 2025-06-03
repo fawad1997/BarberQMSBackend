@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import asyncio
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,17 @@ app.include_router(schedules.router)  # Add the new schedules router
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve the favicon.ico file"""
+    favicon_path = os.path.join("static", "favicon.ico")
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path, media_type="image/x-icon")
+    else:
+        # Return a 404 if favicon not found
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Favicon not found")
 
 # Debug route to capture and analyze the redirect issue
 @app.get("/debug-redirect")
