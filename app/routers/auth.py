@@ -1,6 +1,7 @@
 # app/routers/auth.py
 
 from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app import models, schemas
 from app.schemas import TIMEZONE, convert_to_utc
@@ -12,6 +13,8 @@ import os
 from pytz import timezone
 from fastapi.security import OAuth2PasswordRequestForm
 import logging
+import secrets
+from app.utils.email_service import email_service
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -194,4 +197,194 @@ async def validate_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate token"
+        )
+
+@router.post("/forgot-password", response_model=schemas.ForgotPasswordResponse)
+async def forgot_password(
+    request: schemas.ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Send password reset email to user if email exists in system
+    """
+    try:
+        # Find user by email
+        user = db.query(models.User).filter(models.User.email == request.email).first()
+        
+        # Always return success for security (prevent email enumeration)
+        if not user:
+            return schemas.ForgotPasswordResponse(
+                success=True,
+                message="If an account exists with that email, a password reset link will be sent."
+            )
+        
+        # Generate secure reset token
+        reset_token = secrets.token_urlsafe(32)
+        
+        # Set token expiration (1 hour from now)
+        pacific_now = convert_to_utc(datetime.now(TIMEZONE))
+        expires_at = pacific_now + timedelta(hours=1)
+        
+        # Update user with reset token
+        user.reset_token = reset_token
+        user.reset_token_expires = expires_at
+        db.commit()
+        
+        # Send password reset email
+        email_sent = email_service.send_password_reset_email(
+            to_email=user.email,
+            reset_token=reset_token,
+            user_name=user.full_name
+        )
+        
+        if not email_sent:
+            logger.error(f"Failed to send password reset email to {user.email}")
+        
+        return schemas.ForgotPasswordResponse(
+            success=True,
+            message="If an account exists with that email, a password reset link will be sent."
+        )
+        
+    except Exception as e:
+        logger.error(f"Forgot password error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.post("/validate-reset-token", response_model=schemas.ValidateResetTokenResponse)
+async def validate_reset_token(
+    request: schemas.ValidateResetTokenRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Validate password reset token
+    """
+    try:
+        # Find user by reset token
+        user = db.query(models.User).filter(
+            models.User.reset_token == request.token
+        ).first()
+        
+        if not user:
+            return schemas.ValidateResetTokenResponse(
+                valid=False,
+                message="Invalid reset token"
+            )
+        
+        # Check if token has expired
+        pacific_now = convert_to_utc(datetime.now(TIMEZONE))
+        if not user.reset_token_expires or user.reset_token_expires < pacific_now:
+            # Clear expired token
+            user.reset_token = None
+            user.reset_token_expires = None
+            db.commit()
+            
+            return schemas.ValidateResetTokenResponse(
+                valid=False,
+                message="Reset token has expired"
+            )
+        
+        return schemas.ValidateResetTokenResponse(
+            valid=True,
+            message="Token is valid",
+            user_email=user.email
+        )
+        
+    except Exception as e:
+        logger.error(f"Validate reset token error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.post("/reset-password", response_model=schemas.ResetPasswordResponse)
+async def reset_password(
+    request: schemas.ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Reset user password using valid reset token
+    """
+    try:
+        # Find user by reset token
+        user = db.query(models.User).filter(
+            models.User.reset_token == request.token
+        ).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid reset token"
+            )
+        
+        # Check if token has expired
+        pacific_now = convert_to_utc(datetime.now(TIMEZONE))
+        if not user.reset_token_expires or user.reset_token_expires < pacific_now:
+            # Clear expired token
+            user.reset_token = None
+            user.reset_token_expires = None
+            db.commit()
+            
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token has expired"
+            )
+        
+        # Update password
+        user.hashed_password = get_password_hash(request.new_password)
+        
+        # Clear reset token
+        user.reset_token = None
+        user.reset_token_expires = None
+        
+        db.commit()
+        
+        logger.info(f"Password reset successful for user: {user.email}")
+        
+        return schemas.ResetPasswordResponse(
+            success=True,
+            message="Password has been reset successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reset password error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.get("/reset-password", response_class=HTMLResponse)
+async def get_reset_password_page():
+    """
+    Serve the password reset HTML page directly from backend
+    """
+    try:
+        # Read the HTML template
+        template_path = os.path.join(os.path.dirname(__file__), "../../static/reset-password.html")
+        
+        with open(template_path, 'r', encoding='utf-8') as file:
+            html_content = file.read()
+        
+        # Replace placeholders with actual URLs
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        frontend_url = "http://localhost:8080"  # User specified this URL
+        
+        html_content = html_content.replace("{{BACKEND_URL}}", backend_url)
+        html_content = html_content.replace("{{FRONTEND_URL}}", frontend_url)
+        
+        return HTMLResponse(content=html_content, status_code=200)
+        
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>Password Reset Page Not Found</h1><p>The reset page template could not be loaded.</p>",
+            status_code=404
+        )
+    except Exception as e:
+        logger.error(f"Error serving reset password page: {str(e)}")
+        return HTMLResponse(
+            content="<h1>Error</h1><p>Something went wrong loading the reset page.</p>",
+            status_code=500
         )

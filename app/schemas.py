@@ -649,15 +649,11 @@ class DetailedAppointmentResponse(AppointmentResponse):
     
     @computed_field
     def duration_minutes(self) -> int:
-        print('duration_minutes->',self.full_name, self.end_time, self.appointment_time)
-
         if self.end_time and self.appointment_time:
-            # Convert both to UTC, assuming naive datetimes are in local time (you can adjust this)
+            # Convert both to UTC, assuming naive datetimes are in local time
             end = self.end_time.astimezone(timezone.utc) if self.end_time.tzinfo else self.end_time.replace(tzinfo=timezone.utc)
             start = self.appointment_time.astimezone(timezone.utc) if self.appointment_time.tzinfo else self.appointment_time.replace(tzinfo=timezone.utc)
-            print('end->', end, 'start->', start, 'duration->', int((end - start).total_seconds() / 60))
             return int((end - start).total_seconds() / 60)
-
         return 30  # Default duration
     model_config = ConfigDict(from_attributes=True)
 
@@ -769,3 +765,26 @@ class ScheduleOverrideResponse(ScheduleOverrideBase):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8, description="Password must be at least 8 characters long")
+
+class ResetPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ValidateResetTokenRequest(BaseModel):
+    token: str
+
+class ValidateResetTokenResponse(BaseModel):
+    valid: bool
+    message: str
+    user_email: Optional[str] = None
