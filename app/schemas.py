@@ -2,9 +2,9 @@
 
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
+from datetime import datetime, timezone, time, timedelta, date
 from app.models import AppointmentStatus, BarberStatus, QueueStatus, ScheduleRepeatFrequency
 from enum import Enum
-from datetime import datetime, timezone, time, timedelta
 import pytz
 import re
 
@@ -773,6 +773,63 @@ class AppointmentUpdate(BaseModel):
     def validate_guest_fields(cls, v, info):
         # Allow updating individual fields
         return v
+
+class ScheduleBreakBase(BaseModel):
+    break_start: Optional[time] = None
+    break_end: Optional[time] = None
+
+class ScheduleBreakCreate(ScheduleBreakBase):
+    pass
+
+class ScheduleBreakResponse(ScheduleBreakBase):
+    id: int
+    work_schedule_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+class WorkScheduleBase(BaseModel):
+    name: Optional[str] = None
+    day_of_week: Optional[List[int]] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    effective_start_date: Optional[date] = None
+    effective_end_date: Optional[date] = None
+
+class WorkScheduleCreate(WorkScheduleBase):
+    shop_id: int
+    breaks: Optional[List[ScheduleBreakCreate]] = None
+
+class WorkScheduleResponse(WorkScheduleBase):
+    id: int
+    shop_id: int
+    breaks: List[ScheduleBreakResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+class EmployeeScheduleBase(BaseModel):
+    employee_id: int
+    work_schedule_id: int
+
+class EmployeeScheduleCreate(EmployeeScheduleBase):
+    pass
+
+class EmployeeScheduleResponse(EmployeeScheduleBase):
+    model_config = ConfigDict(from_attributes=True)
+
+class ScheduleOverrideBase(BaseModel):
+    barber_id: Optional[int] = None
+    shop_id: int
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    repeat_frequency: Optional[str] = None
+
+class ScheduleOverrideCreate(ScheduleOverrideBase):
+    pass
+
+class ScheduleOverrideResponse(ScheduleOverrideBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 # Password Reset Schemas
 class ForgotPasswordRequest(BaseModel):

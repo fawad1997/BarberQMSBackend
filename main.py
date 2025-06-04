@@ -11,7 +11,8 @@ from app.routers import (
     queue,
     feedback,
     unregistered_users,
-    sso_routes
+    sso_routes,
+    schedules
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
@@ -109,6 +110,7 @@ app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
 app.include_router(websocket_router)  # Include WebSocket router
+app.include_router(schedules.router)  # Add the new schedules router
 
 
 @app.get("/")

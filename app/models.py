@@ -14,6 +14,7 @@ from sqlalchemy import (
     Enum,
     Table,
     UniqueConstraint,
+    ARRAY,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -143,6 +144,8 @@ class Shop(Base):
     operating_hours = relationship(
         "ShopOperatingHours", back_populates="shop", cascade="all, delete-orphan"
     )
+    work_schedules = relationship("WorkSchedule", back_populates="shop", cascade="all, delete-orphan")
+    schedule_overrides = relationship("ScheduleOverride", back_populates="shop", cascade="all, delete-orphan")
 
 
 class ShopOperatingHours(Base):
@@ -186,6 +189,8 @@ class Barber(Base):
     schedules = relationship(
         "BarberSchedule", back_populates="barber", cascade="all, delete-orphan"
     )
+    work_schedules = relationship("WorkSchedule", secondary="employee_schedules", back_populates="employees")
+    schedule_overrides = relationship("ScheduleOverride", back_populates="barber", cascade="all, delete-orphan")
 
 
 class Service(Base):
@@ -339,3 +344,55 @@ class BarberSchedule(Base):
     @property
     def shop_id(self):
         return self.barber.shop_id
+
+
+class WorkSchedule(Base):
+    __tablename__ = "work_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    name = Column(String, nullable=True)
+    day_of_week = Column(ARRAY(Integer), nullable=True)
+    start_time = Column(Time, nullable=True)
+    end_time = Column(Time, nullable=True)
+    effective_start_date = Column(Date, nullable=True)
+    effective_end_date = Column(Date, nullable=True)
+
+    # Relationships
+    shop = relationship("Shop", back_populates="work_schedules")
+    breaks = relationship("ScheduleBreak", back_populates="work_schedule", cascade="all, delete-orphan")
+    employees = relationship("Barber", secondary="employee_schedules", back_populates="work_schedules")
+
+
+class ScheduleBreak(Base):
+    __tablename__ = "schedule_breaks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_schedule_id = Column(Integer, ForeignKey("work_schedules.id"), nullable=False)
+    break_start = Column(Time, nullable=True)
+    break_end = Column(Time, nullable=True)
+
+    # Relationships
+    work_schedule = relationship("WorkSchedule", back_populates="breaks")
+
+
+class EmployeeSchedule(Base):
+    __tablename__ = "employee_schedules"
+
+    employee_id = Column(Integer, ForeignKey("barbers.id"), primary_key=True)
+    work_schedule_id = Column(Integer, ForeignKey("work_schedules.id"), primary_key=True)
+
+
+class ScheduleOverride(Base):
+    __tablename__ = "schedule_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    repeat_frequency = Column(String, nullable=True)
+
+    # Relationships
+    barber = relationship("Barber", back_populates="schedule_overrides")
+    shop = relationship("Shop", back_populates="schedule_overrides")
