@@ -8,13 +8,15 @@ router = APIRouter()
 
 # Add this helper function after imports but before routes
 async def get_public_shop_by_id_or_slug(shop_id_or_slug: str, db: Session):
-    """Helper function to get a shop by ID or slug for public access."""
+    """Helper function to get a shop by ID, slug, or username for public access."""
     try:
         shop_id = int(shop_id_or_slug)
         shop = db.query(Shop).filter(Shop.id == shop_id).first()
     except ValueError:
-        # If not an integer, treat as slug
-        shop = db.query(Shop).filter(Shop.slug == shop_id_or_slug).first()
+        # If not an integer, treat as slug or username
+        shop = db.query(Shop).filter(
+            (Shop.slug == shop_id_or_slug) | (Shop.username == shop_id_or_slug)
+        ).first()
     
     if not shop:
         raise HTTPException(
