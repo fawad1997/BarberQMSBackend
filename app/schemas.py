@@ -259,7 +259,7 @@ class ShopBase(BaseModel):
     is_open: Optional[bool] = None
     formatted_hours: Optional[str] = None
     slug: str
-    username: Optional[str] = None
+    username: str  # Username is now required
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -276,13 +276,11 @@ class ShopCreate(BaseModel):
     average_wait_time: Optional[float] = 0.0
     operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
     slug: Optional[str] = None
-    username: Optional[str] = None
+    username: str  # Username is now required
 
     @field_validator('username')
     def validate_username_field(cls, v):
-        if v is not None:
-            return validate_username(v)
-        return v
+        return validate_username(v)
 
     model_config = ConfigDict(from_attributes=True)
 
