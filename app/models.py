@@ -81,6 +81,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_first_login = Column(Boolean, default=True)  # Track first-time login
     
     # Password reset fields
     reset_token = Column(String, nullable=True, index=True)
@@ -106,6 +107,7 @@ class Shop(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
+    username = Column(String, unique=True, nullable=True, index=True)  # New username field
     address = Column(String, nullable=False)
     city = Column(String, nullable=False)
     state = Column(String, nullable=False)

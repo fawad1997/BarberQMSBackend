@@ -27,9 +27,42 @@ get_current_shop_owner = get_current_user_by_role(UserRole.SHOP_OWNER)
 UPLOAD_DIR = "static/advertisements"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Username availability check endpoint
+@router.get("/check-username/{username}", response_model=schemas.UsernameAvailabilityResponse)
+def check_username_availability(
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """Check if a username is available for a shop."""
+    try:
+        # Validate username format
+        validated_username = schemas.validate_username(username)
+        
+        # Check availability
+        available = schemas.is_username_available(validated_username, db)
+        
+        if available:
+            return schemas.UsernameAvailabilityResponse(
+                username=validated_username,
+                available=True,
+                message="Username is available"
+            )
+        else:
+            return schemas.UsernameAvailabilityResponse(
+                username=validated_username,
+                available=False,
+                message="Username is already taken"
+            )
+    except ValueError as e:
+        return schemas.UsernameAvailabilityResponse(
+            username=username,
+            available=False,
+            message=str(e)
+        )
+
 # Add this function after the imports but before the routes
 async def get_shop_by_id_or_slug(shop_id_or_slug: str, db: Session, user_id: int):
-    """Helper function to get a shop by ID or slug and verify ownership."""
+    """Helper function to get a shop by ID, slug, or username and verify ownership."""
     try:
         shop_id = int(shop_id_or_slug)
         shop = db.query(models.Shop).filter(
@@ -37,9 +70,9 @@ async def get_shop_by_id_or_slug(shop_id_or_slug: str, db: Session, user_id: int
             models.Shop.owner_id == user_id
         ).first()
     except ValueError:
-        # If not an integer, treat as slug
+        # If not an integer, treat as slug or username
         shop = db.query(models.Shop).filter(
-            models.Shop.slug == shop_id_or_slug,
+            (models.Shop.slug == shop_id_or_slug) | (models.Shop.username == shop_id_or_slug),
             models.Shop.owner_id == user_id
         ).first()
     
@@ -64,9 +97,31 @@ def create_shop(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot create more than 10 shops."
-        )
-
-    # Generate slug if not provided
+        )    # Handle username validation and availability - username is now required
+    username = None
+    if shop_in.username:
+        try:
+            username = schemas.validate_username(shop_in.username)
+            if not schemas.is_username_available(username, db):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Username '{username}' is already taken"
+                )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+    else:
+        # Generate username from shop name if not provided
+        base_username = schemas.generate_slug(shop_in.name)
+        username = base_username
+        counter = 1
+        
+        # Ensure username is unique
+        while not schemas.is_username_available(username, db):
+            username = f"{base_username}-{counter}"
+            counter += 1# Generate slug if not provided
     if not shop_in.slug:
         base_slug = schemas.generate_slug(shop_in.name)
         slug = base_slug
@@ -88,16 +143,16 @@ def create_shop(
                 detail=f"Shop with slug '{slug}' already exists. Please choose a different name."
             )
 
-    # Create shop with the generated/validated slug
+    # Create shop with the generated/validated slug and username
     shop = models.Shop(
         name=shop_in.name,
         slug=slug,
+        username=username,
         address=shop_in.address,
         city=shop_in.city,
         state=shop_in.state,
         zip_code=shop_in.zip_code,
-        phone_number=shop_in.phone_number,
-        email=shop_in.email,
+        phone_number=shop_in.phone_number,        email=shop_in.email,
         owner_id=current_user.id,
         opening_time=shop_in.opening_time,
         closing_time=shop_in.closing_time,
@@ -175,7 +230,7 @@ def get_shop_by_id(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Get shop details by ID or slug."""
+    """Get shop details by ID, slug, or username."""
     # Try to parse as integer (shop_id)
     try:
         shop_id = int(shop_id_or_slug)
@@ -186,9 +241,9 @@ def get_shop_by_id(
             joinedload(models.Shop.operating_hours)
         ).first()
     except ValueError:
-        # If not an integer, treat as slug
+        # If not an integer, treat as slug or username
         shop = db.query(models.Shop).filter(
-            models.Shop.slug == shop_id_or_slug,
+            (models.Shop.slug == shop_id_or_slug) | (models.Shop.username == shop_id_or_slug),
             models.Shop.owner_id == current_user.id
         ).options(
             joinedload(models.Shop.operating_hours)
@@ -202,6 +257,8 @@ def get_shop_by_id(
 
     return shop
 
+    return shop
+
 @router.put("/shops/{shop_id_or_slug}", response_model=schemas.ShopResponse)
 def update_shop(
     shop_id_or_slug: str,
@@ -209,7 +266,7 @@ def update_shop(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    """Update shop details by ID or slug."""
+    """Update shop details by ID, slug, or username."""
     # Try to parse as integer (shop_id)
     try:
         shop_id = int(shop_id_or_slug)
@@ -218,9 +275,9 @@ def update_shop(
             models.Shop.owner_id == current_user.id
         ).first()
     except ValueError:
-        # If not an integer, treat as slug
+        # If not an integer, treat as slug or username
         shop = db.query(models.Shop).filter(
-            models.Shop.slug == shop_id_or_slug,
+            (models.Shop.slug == shop_id_or_slug) | (models.Shop.username == shop_id_or_slug),
             models.Shop.owner_id == current_user.id
         ).first()
 
@@ -228,7 +285,24 @@ def update_shop(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Shop not found"
-        )
+        )# Handle username update if provided
+    if shop_in.username is not None:
+        try:
+            new_username = schemas.validate_username(shop_in.username)
+            
+            # Check if new username already exists (and isn't the current shop's username)
+            if not schemas.is_username_available(new_username, db, exclude_shop_id=shop.id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Username '{new_username}' is already taken"
+                )
+            
+            shop.username = new_username
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
 
     # Handle slug update if provided
     if shop_in.slug is not None:
@@ -249,7 +323,7 @@ def update_shop(
         shop.slug = new_slug
 
     # Update other fields
-    update_data = shop_in.model_dump(exclude_unset=True, exclude={"slug"})
+    update_data = shop_in.model_dump(exclude_unset=True, exclude={"slug", "username"})
     
     for key, value in update_data.items():
         setattr(shop, key, value)
@@ -798,25 +872,25 @@ async def remove_barber(
         )
 
 # Add a duplicate route with trailing slash
-@router.delete("/shops/{shop_id_or_slug}/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shops/{shop_id}/barbers/{barber_id}/", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_barber_with_slash(
-    shop_id_or_slug: str,
+    shop_id: int,
     barber_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route with trailing slash to ensure URL matching"""
-    return await remove_barber(shop_id_or_slug, barber_id, db, current_user)
+    return await remove_barber(shop_id, barber_id, db, current_user)
 
-@router.post("/shops/{shop_id_or_slug}/services/", response_model=schemas.ServiceResponse)
+@router.post("/shops/{shop_id}/services/", response_model=schemas.ServiceResponse)
 async def create_service(
-    shop_id_or_slug: str,
+    shop_id: int,
     service_in: schemas.ServiceCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Create a new service for a shop."""
-    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id, db, current_user.id)
     
     new_service = models.Service(
         name=service_in.name,
@@ -830,36 +904,36 @@ async def create_service(
     return new_service
 
 
-@router.get("/shops/{shop_id_or_slug}/services/", response_model=List[schemas.ServiceResponse])
+@router.get("/shops/{shop_id}/services/", response_model=List[schemas.ServiceResponse])
 async def get_services(
-    shop_id_or_slug: str,
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id, db, current_user.id)
     
     services = db.query(models.Service).filter(models.Service.shop_id == shop.id).all()
     return services
 
 # Add duplicate route without trailing slash to ensure URL matching
-@router.get("/shops/{shop_id_or_slug}/services", response_model=List[schemas.ServiceResponse])
+@router.get("/shops/{shop_id}/services", response_model=List[schemas.ServiceResponse])
 async def get_services_no_slash(
-    shop_id_or_slug: str,
+    shop_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Duplicate route without trailing slash to ensure URL matching"""
-    return await get_services(shop_id_or_slug, db, current_user)
+    return await get_services(shop_id, db, current_user)
 
-@router.put("/shops/{shop_id_or_slug}/services/{service_id}", response_model=schemas.ServiceResponse)
+@router.put("/shops/{shop_id}/services/{service_id}", response_model=schemas.ServiceResponse)
 async def update_service(
-    shop_id_or_slug: str,
+    shop_id: int,
     service_id: int,
     service_in: schemas.ServiceUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id, db, current_user.id)
     
     service = db.query(models.Service).filter(
         models.Service.id == service_id,
@@ -877,14 +951,14 @@ async def update_service(
     return service
 
 
-@router.delete("/shops/{shop_id_or_slug}/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/shops/{shop_id}/services/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_service(
-    shop_id_or_slug: str,
+    shop_id: int,
     service_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_shop_owner)
 ):
-    shop = await get_shop_by_id_or_slug(shop_id_or_slug, db, current_user.id)
+    shop = await get_shop_by_id_or_slug(shop_id, db, current_user.id)
     
     service = db.query(models.Service).filter(
         models.Service.id == service_id,

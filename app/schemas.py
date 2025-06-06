@@ -42,6 +42,52 @@ def generate_slug(name: str) -> str:
     slug = slug.strip('-')
     return slug
 
+# Reserved usernames that cannot be used by shops
+RESERVED_USERNAMES = {
+    "my-shop", "barbershop", "barber-shop", "my-barber-shop",
+    "admin", "api", "www", "mail", "ftp", "localhost", "test",
+    "support", "help", "contact", "about", "privacy", "terms",
+    "login", "register", "signup", "dashboard", "profile", "settings"
+}
+
+def validate_username(username: str) -> str:
+    """Validate and format username according to business rules"""
+    if not username:
+        raise ValueError("Username cannot be empty")
+    
+    # Convert to lowercase and clean
+    username = username.lower().strip()
+    
+    # Check length (minimum 3, maximum 30 characters)
+    if len(username) < 3:
+        raise ValueError("Username must be at least 3 characters long")
+    if len(username) > 30:
+        raise ValueError("Username must be no more than 30 characters long")
+    
+    # Check for valid characters (alphanumeric, hyphens, underscores)
+    if not re.match(r'^[a-z0-9-_]+$', username):
+        raise ValueError("Username can only contain lowercase letters, numbers, hyphens, and underscores")
+    
+    # Check if it starts or ends with special characters
+    if username.startswith(('-', '_')) or username.endswith(('-', '_')):
+        raise ValueError("Username cannot start or end with hyphens or underscores")
+    
+    # Check against reserved usernames
+    if username in RESERVED_USERNAMES:
+        raise ValueError(f"Username '{username}' is reserved and cannot be used")
+    
+    return username
+
+def is_username_available(username: str, db, exclude_shop_id: Optional[int] = None) -> bool:
+    """Check if username is available (not taken by another shop)"""
+    from app import models
+    
+    query = db.query(models.Shop).filter(models.Shop.username == username)
+    if exclude_shop_id:
+        query = query.filter(models.Shop.id != exclude_shop_id)
+    
+    return query.first() is None
+
 class UserRole(str, Enum):
     user = "USER"
     shop_owner = "SHOP_OWNER"
@@ -76,6 +122,7 @@ class UserResponse(UserBase):
     is_active: bool
     role: UserRole
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
@@ -213,6 +260,7 @@ class ShopBase(BaseModel):
     is_open: Optional[bool] = None
     formatted_hours: Optional[str] = None
     slug: str
+    username: str  # Username is now required
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -229,6 +277,11 @@ class ShopCreate(BaseModel):
     average_wait_time: Optional[float] = 0.0
     operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
     slug: Optional[str] = None
+    username: str  # Username is now required
+
+    @field_validator('username')
+    def validate_username_field(cls, v):
+        return validate_username(v)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -249,6 +302,13 @@ class ShopUpdate(BaseModel):
     advertisement_end_date: Optional[datetime] = None
     is_advertisement_active: Optional[bool] = None
     slug: Optional[str] = None
+    username: Optional[str] = None
+
+    @field_validator('username')
+    def validate_username_field(cls, v):
+        if v is not None:
+            return validate_username(v)
+        return v
 
     # Add validator for dates
     @field_validator('advertisement_start_date', 'advertisement_end_date')
@@ -476,6 +536,7 @@ class TokenWithUserDetails(Token):
     role: UserRole
     is_active: bool
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
@@ -820,3 +881,11 @@ class ValidateResetTokenResponse(BaseModel):
     valid: bool
     message: str
     user_email: Optional[str] = None
+
+# Username availability response schema
+class UsernameAvailabilityResponse(BaseModel):
+    username: str
+    available: bool
+    message: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
