@@ -81,6 +81,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_first_login = Column(Boolean, default=True)  # Track first-time login
     
     # Password reset fields
     reset_token = Column(String, nullable=True, index=True)

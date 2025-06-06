@@ -7,7 +7,7 @@ from app import models, schemas
 from app.schemas import TIMEZONE, convert_to_utc
 from app.database import get_db
 from app.core.security import verify_password, create_access_token, get_password_hash, decode_access_token
-from app.core.dependencies import oauth2_scheme
+from app.core.dependencies import oauth2_scheme, get_current_active_user
 from datetime import timedelta, datetime
 import os
 from pytz import timezone
@@ -87,6 +87,9 @@ async def login_json(
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
     
+    # Check if this is first login
+    is_first_login = user.is_first_login
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -96,7 +99,8 @@ async def login_json(
         "phone_number": user.phone_number,
         "role": user.role,
         "is_active": user.is_active,
-        "created_at": user.created_at
+        "created_at": user.created_at,
+        "is_first_login": is_first_login
     }
 
 @router.post("/login/form", response_model=schemas.TokenWithUserDetails)
@@ -124,8 +128,7 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
+    if not verify_password(form_data.password, user.hashed_password):        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
@@ -135,7 +138,6 @@ async def login_for_access_token(
     access_token = create_access_token(
         data={"sub": str(user.id)}, expires_delta=access_token_expires
     )
-    
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -145,7 +147,8 @@ async def login_for_access_token(
         "phone_number": user.phone_number,
         "role": user.role,
         "is_active": user.is_active,
-        "created_at": user.created_at
+        "created_at": user.created_at,
+        "is_first_login": user.is_first_login
     }
 
 @router.get("/validate-token", response_model=schemas.TokenWithUserDetails)
@@ -160,8 +163,7 @@ async def validate_token(
     try:
         # Decode the token
         payload = decode_access_token(token)
-        if not payload or "sub" not in payload:
-            raise HTTPException(
+        if not payload or "sub" not in payload:            raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
             )
@@ -190,7 +192,8 @@ async def validate_token(
             "phone_number": user.phone_number or "",
             "role": user.role,
             "is_active": user.is_active,
-            "created_at": user.created_at
+            "created_at": user.created_at,
+            "is_first_login": user.is_first_login
         }
     except Exception as e:
         logger.error(f"Token validation error: {str(e)}")
@@ -385,6 +388,30 @@ async def get_reset_password_page():
     except Exception as e:
         logger.error(f"Error serving reset password page: {str(e)}")
         return HTMLResponse(
-            content="<h1>Error</h1><p>Something went wrong loading the reset page.</p>",
+            content="<h1>Error</h1><p>An error occurred while loading the page.</p>",
             status_code=500
+        )
+
+@router.post("/complete-walkthrough")
+async def complete_walkthrough(
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark the user's walkthrough as completed by setting is_first_login to False
+    """
+    try:
+        current_user.is_first_login = False
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Walkthrough completed successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error completing walkthrough: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete walkthrough"
         )

@@ -122,6 +122,7 @@ class UserResponse(UserBase):
     is_active: bool
     role: UserRole
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
@@ -535,6 +536,7 @@ class TokenWithUserDetails(Token):
     role: UserRole
     is_active: bool
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
