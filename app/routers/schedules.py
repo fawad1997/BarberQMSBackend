@@ -11,6 +11,7 @@ from app.schemas import (
     EmployeeScheduleCreate, EmployeeScheduleResponse,
     ScheduleOverrideCreate, ScheduleOverrideResponse
 )
+from app.utils.schedule_utils import check_override_conflicts, get_recurring_override_instances
 
 router = APIRouter(
     prefix="/schedules",
@@ -305,6 +306,13 @@ async def create_schedule_override(
             raise HTTPException(status_code=404, detail="Barber not found")
         if barber.shop_id != override.shop_id:
             raise HTTPException(status_code=400, detail="Barber must belong to the specified shop")
+        
+        # Check for conflicts with existing overrides
+        if check_override_conflicts(db, barber.id, override.start_date, override.end_date):
+            raise HTTPException(
+                status_code=400,
+                detail="Schedule conflict: Another override exists for this time period"
+            )
     
     # Verify user has permission to manage the shop
     shop = db.query(models.Shop).filter(models.Shop.id == override.shop_id).first()
@@ -342,6 +350,28 @@ async def get_schedule_overrides(
         query = query.filter(models.ScheduleOverride.end_date <= end_date)
     
     overrides = query.all()
+    
+    # If date range is specified, expand recurring overrides
+    if start_date and end_date:
+        expanded_overrides = []
+        for override in overrides:
+            instances = get_recurring_override_instances(
+                override,
+                datetime.combine(start_date, datetime.min.time()),
+                datetime.combine(end_date, datetime.max.time())
+            )
+            for instance in instances:
+                expanded_override = models.ScheduleOverride(
+                    id=override.id,
+                    barber_id=override.barber_id,
+                    shop_id=override.shop_id,
+                    start_date=instance["start_datetime"],
+                    end_date=instance["end_datetime"],
+                    repeat_frequency=override.repeat_frequency
+                )
+                expanded_overrides.append(expanded_override)
+        return expanded_overrides
+    
     return overrides
 
 @router.put("/overrides/{override_id}", response_model=ScheduleOverrideResponse)
@@ -360,6 +390,14 @@ async def update_schedule_override(
     shop = db.query(models.Shop).filter(models.Shop.id == db_override.shop_id).first()
     if not shop or shop.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to manage this override")
+    
+    # Check for conflicts if barber_id is specified
+    if override.barber_id:
+        if check_override_conflicts(db, override.barber_id, override.start_date, override.end_date, override_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Schedule conflict: Another override exists for this time period"
+            )
     
     for key, value in override.model_dump(exclude_unset=True).items():
         setattr(db_override, key, value)

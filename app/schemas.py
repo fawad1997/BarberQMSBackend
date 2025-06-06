@@ -760,7 +760,34 @@ class ScheduleOverrideBase(BaseModel):
     shop_id: int
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    repeat_frequency: Optional[str] = None
+    repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
+        return v
+
+    @field_validator("start_date", "end_date")
+    def validate_dates(cls, v):
+        if v is not None and v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        return v
+
+    @field_validator("end_date")
+    def validate_end_date(cls, v, info):
+        if v is not None and "start_date" in info.data and info.data["start_date"] is not None:
+            start_date = info.data["start_date"]
+            if v <= start_date:
+                raise ValueError("End date must be after start date")
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ScheduleOverrideCreate(ScheduleOverrideBase):
     pass
