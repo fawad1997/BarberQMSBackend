@@ -46,6 +46,8 @@ origins = [
     "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
+    "https://walkinonline.app",
+    "https://www.walkinonline.app",
     "*"
 ]
 
