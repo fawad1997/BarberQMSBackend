@@ -61,3 +61,118 @@
   
   Refer to FastAPI documentation for Data Models, Path Operations, and Middleware for best practices.
   
+## Current File Structure
+├──  .cursor
+│   └──  rules
+├──  .roo
+│   ├──  rules
+│   ├──  rules-architect
+│   ├──  rules-ask
+│   ├──  rules-boomerang
+│   ├──  rules-code
+│   ├──  rules-debug
+│   └──  rules-test
+├──  .taskmaster
+│   ├──  docs
+│   ├──  reports
+│   ├──  tasks
+│   └──  templates
+├──  alembic
+│   ├──  versions
+│   │   ├──  0807f1a08cea_add_is_first_login_column.py
+│   │   ├──  0920b2ad538d_add_end_time_to_appointments.py
+│   │   ├──  0b66b21e970a_merge_all_heads.py
+│   │   ├──  295ac38707fb_updated_no_of_people_in_appointments.py
+│   │   ├──  3b8afedc0e3d_merge_migration_heads.py
+│   │   ├──  3dcab5da49c5_made_24_hour_shop.py
+│   │   ├──  44e64a3028e5_create_initial_schema.py
+│   │   ├──  6a092695a76d_fix_migration_chain.py
+│   │   ├──  717763e284e8_barber_schedule_changes.py
+│   │   ├──  8310e0ff1a7f_merge_heads.py
+│   │   ├──  842dad3f7a91_make_service_id_nullable_in_queue_.py
+│   │   ├──  8f2ca4d6d0f4_make_username_required_in_shops.py
+│   │   ├──  928fa08d08d7_made_barber_if_and_service_nullable_in_.py
+│   │   ├──  abcd1234efgh_update_sched_override_repeat_freq.py
+│   │   ├──  add_username_to_shops.py
+│   │   ├──  b4c5d8019e25_add_password_reset_fields_to_user_model.py
+│   │   ├──  c164b26e5724_updated_shop_hours.py
+│   │   ├──  create_work_schedules.py
+│   │   ├──  ee20217de0b5_slug_added_shop_duration_table_added_.py
+│   │   ├──  f7db13e6fc1b_added_username.py
+│   │   ├──  f817499aaaf8_barber_schedule_changes_again.py
+│   │   ├──  fff50fee97e4_update_barber_schedule_schema.py
+│   │   ├──  merge_work_schedules_heads.py
+│   │   ├──  remove_timestamps_barber_schedules.py
+│   │   ├──  update_schedule_override_repeat_frequency.py
+│   │   ├──  update_sched_override_repeat_freq.py
+│   │   └──  update_timestamps_timezone.py
+│   ├──  env.py
+│   ├──  README
+│   └──  script.py.mako
+├──  app
+│   ├──  core
+│   │   ├──  auth.py
+│   │   ├──  dependencies.py
+│   │   ├──  security.py
+│   │   └──  __init__.py
+│   ├──  mcp
+│   ├──  models
+│   ├──  routers
+│   │   ├──  admin.py
+│   │   ├──  appointments.py
+│   │   ├──  auth.py
+│   │   ├──  barbers.py
+│   │   ├──  feedback.py
+│   │   ├──  public.py
+│   │   ├──  queue.py
+│   │   ├──  schedules.py
+│   │   ├──  shop_owners.py
+│   │   ├──  sso_routes.py
+│   │   ├──  unregistered_users.py
+│   │   ├──  users.py
+│   │   └──  __init__.py
+│   ├──  services
+│   ├──  utils
+│   │   ├──  email_service.py
+│   │   ├──  schedule_utils.py
+│   │   └──  shop_utils.py
+│   ├──  websockets
+│   │   ├──  manager.py
+│   │   ├──  README.md
+│   │   ├──  router.py
+│   │   ├──  tasks.py
+│   │   ├──  utils.py
+│   │   └──  __init__.py
+│   ├──  database.py
+│   ├──  models.py
+│   ├──  schemas.py
+│   └──  __init__.py
+├──  migrations
+│   └──  versions
+│       └──  xxxx_recreate_user_role_enum.py
+├──  static
+│   ├──  advertisements
+│   │   ├──  0a5b46a8-5b6e-4399-aba8-cb8305f902fd.png
+│   │   ├──  b4b4ee74-54ef-41fe-a103-64152813663c.png
+│   │   ├──  fef96b66-d86a-4200-9505-f74a5aac3c60.png
+│   │   └──  ff4f97ac-4873-4da6-9f94-8b8d0ae1fc4b.png
+│   ├──  favicon.ico
+│   └──  reset-password.html
+├──  .cursorrules
+├──  .dockerignore
+├──  .env
+├──  add_username_migration.py
+├──  alembic.ini
+├──  commands.md
+├──  delete_all_users.py
+├──  docker-compose.yml
+├──  Dockerfile
+├──  main.py
+├──  PASSWORD_RESET_SETUP.md
+├──  Procfile
+├──  PRODUCTION_EMAIL_SETUP.md
+├──  README.md
+├──  requirements.txt
+├──  test_models.py
+├──  test_username_functionality.py
+└──  websocket_test.py
