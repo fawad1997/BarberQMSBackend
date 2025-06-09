@@ -39,7 +39,7 @@ services:
   - name: web
     source_dir: /
     github:
-      repo: YOUR_GITHUB_USERNAME/BarberQMSBackend  # Update this
+      repo: fawad1997/BarberQMSBackend  # Update this
       branch: test-deploy  # or main
     dockerfile_path: Dockerfile
     run_command: uvicorn main:app --host 0.0.0.0 --port 8080
