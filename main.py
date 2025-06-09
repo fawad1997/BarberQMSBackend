@@ -118,18 +118,38 @@ app.include_router(schedules.router)  # Add the new schedules router
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
 
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for basic connectivity testing"""
+    return {"status": "ok", "message": "pong"}
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for deployment verification"""
     try:
-        # You can add database connectivity check here if needed
-        return {
+        health_data = {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat(),
             "environment": os.getenv("ENVIRONMENT", "development"),
-            "version": "1.0.0"  # Update this with your app version
+            "version": "1.0.0"
         }
+        
+        # Optional: Add database connectivity check in production
+        try:
+            from app.database import SessionLocal
+            db = SessionLocal()
+            # Simple query to test DB connection
+            db.execute("SELECT 1")
+            db.close()
+            health_data["database"] = "connected"
+        except Exception as db_error:
+            # Don't fail health check for DB issues during startup
+            logger.warning(f"Database connection warning: {db_error}")
+            health_data["database"] = "warning"
+        
+        return health_data
     except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
 @app.get("/favicon.ico")

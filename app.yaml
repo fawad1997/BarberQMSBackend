@@ -22,7 +22,7 @@ jobs:
       repo: fawad1997/BarberQMSBackend  # Update this
       branch: test-deploy  # or main
     dockerfile_path: Dockerfile
-    run_command: alembic upgrade head
+    run_command: cd /app && python -m alembic upgrade head
     environment_slug: python
     instance_count: 1
     instance_size_slug: basic-xxs
@@ -33,6 +33,9 @@ jobs:
       - key: ENVIRONMENT
         scope: RUN_AND_BUILD_TIME
         value: production
+      - key: PYTHONPATH
+        scope: RUN_AND_BUILD_TIME
+        value: /app
 
 # Main FastAPI service
 services:
@@ -50,10 +53,11 @@ services:
     # Port configuration
     http_port: 8080
     
-    # Health check
+    # Health check configuration
     health_check:
-      http_path: /health
-      initial_delay_seconds: 30
+      http_path: /ping
+      port: 8080
+      initial_delay_seconds: 15
       period_seconds: 10
       timeout_seconds: 5
       success_threshold: 1
@@ -70,11 +74,14 @@ services:
       - key: SECRET_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
-        value: your_secret_key_here  # Replace with a secure secret
+        value: barber_qms_secret_key_change_in_production_2024
       - key: JWT_SECRET_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
-        value: your_jwt_secret_here  # Replace with a secure JWT secret
+        value: barber_qms_jwt_secret_2024_change_me
+      - key: PYTHONPATH
+        scope: RUN_AND_BUILD_TIME
+        value: /app
       # Add other environment variables as needed
       # - key: EMAIL_SMTP_SERVER
       #   scope: RUN_AND_BUILD_TIME
