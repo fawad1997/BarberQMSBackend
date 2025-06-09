@@ -1,26 +1,26 @@
-# DigitalOcean App Platform Specification
-# This file defines your app structure and deployment configuration
+# DigitalOcean App Platform Specification - STAGING ENVIRONMENT
+# This file defines your staging app structure and deployment configuration
 
-name: barber-qms-backend
+name: barber-qms-backend-staging
 region: nyc
 
-# Database component (if using DO Managed Database)
+# Database component (staging database)
 databases:
-  - name: barber-qms-db
+  - name: barber-qms-db-staging
     engine: PG
     version: "15"
-    size: db-s-1vcpu-1gb  # Adjust based on your needs
+    size: db-s-1vcpu-1gb  # Smaller for staging
     num_nodes: 1
-    production: true
+    production: false  # Staging environment
 
 # Pre-deploy job for database migrations
 jobs:
-  - name: db-migrate
+  - name: db-migrate-staging
     kind: PRE_DEPLOY
     source_dir: /
     github:
-      repo: fawad1997/BarberQMSBackend  # Update this
-      branch: main  # Production uses main branch
+      repo: fawad1997/BarberQMSBackend
+      branch: test-deploy  # Staging uses test-deploy branch
     dockerfile_path: Dockerfile
     run_command: cd /app && python -m alembic upgrade head
     environment_slug: python
@@ -29,26 +29,26 @@ jobs:
     envs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
-        value: ${barber-qms-db.DATABASE_URL}
+        value: ${barber-qms-db-staging.DATABASE_URL}
       - key: ENVIRONMENT
         scope: RUN_AND_BUILD_TIME
-        value: production
+        value: staging
       - key: PYTHONPATH
         scope: RUN_AND_BUILD_TIME
         value: /app
 
 # Main FastAPI service
 services:
-  - name: web
+  - name: web-staging
     source_dir: /
     github:
-      repo: fawad1997/BarberQMSBackend  # Update this
-      branch: main  # Production uses main branch
+      repo: fawad1997/BarberQMSBackend
+      branch: test-deploy  # Staging uses test-deploy branch
     dockerfile_path: Dockerfile
     run_command: uvicorn main:app --host 0.0.0.0 --port 8080
     environment_slug: python
     instance_count: 1
-    instance_size_slug: basic-xxs  # Adjust based on your needs
+    instance_size_slug: basic-xxs  # Smaller for staging
     
     # Port configuration
     http_port: 8080
@@ -67,34 +67,18 @@ services:
     envs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
-        value: ${barber-qms-db.DATABASE_URL}
+        value: ${barber-qms-db-staging.DATABASE_URL}
       - key: ENVIRONMENT
         scope: RUN_AND_BUILD_TIME
-        value: production
+        value: staging
       - key: SECRET_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
-        value: barber_qms_secret_key_change_in_production_2024
+        value: barber_qms_staging_secret_key_2024
       - key: JWT_SECRET_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
-        value: barber_qms_jwt_secret_2024_change_me
+        value: barber_qms_staging_jwt_secret_2024
       - key: PYTHONPATH
         scope: RUN_AND_BUILD_TIME
-        value: /app
-      # Add other environment variables as needed
-      # - key: EMAIL_SMTP_SERVER
-      #   scope: RUN_AND_BUILD_TIME
-      #   value: smtp.gmail.com
-      # - key: EMAIL_SMTP_PORT
-      #   scope: RUN_AND_BUILD_TIME
-      #   value: "587"
-
-# Static site for any frontend (optional)
-# static_sites:
-#   - name: frontend
-#     github:
-#       repo: YOUR_GITHUB_USERNAME/BarberQMSFrontend
-#       branch: main
-#     build_command: npm run build
-#     output_dir: /dist 
+        value: /app 

@@ -137,14 +137,22 @@ For advanced features, add these GitHub secrets:
    alembic upgrade head  # Test locally
    ```
 
-2. **Deploy to production:**
+2. **Deploy to staging (test-deploy branch):**
    ```bash
    git add .
    git commit -m "Add new feature with migration"
    git push origin test-deploy
    ```
 
-3. **App Platform automatically:**
+3. **Deploy to production (main branch):**
+   ```bash
+   # After testing on staging
+   git checkout main
+   git merge test-deploy
+   git push origin main
+   ```
+
+4. **App Platform automatically (on both branches):**
    - Builds your app
    - Runs `alembic upgrade head` (migration job)
    - Deploys new version if migration succeeds
@@ -208,9 +216,9 @@ curl -X POST \
 ## 💡 Pro Tips
 
 1. **Environment-based Deployments:**
-   - Use `test-deploy` branch for staging
-   - Use `main` branch for production
-   - Create separate apps for different environments
+   - ✅ **`test-deploy` branch** → Automatic staging deployments with migrations
+   - ✅ **`main` branch** → Automatic production deployments with migrations
+   - Use `app-staging.yaml` to create separate staging app on App Platform
 
 2. **Database Backups:**
    - DigitalOcean Managed Database automatically creates daily backups
@@ -241,4 +249,8 @@ Once deployed, your app will be available at:
 
 ---
 
-🎯 **No more manual SSH, no more broken deployments!** Every push to `test-deploy` automatically updates your production app with proper database migrations. 
+🎯 **No more manual SSH, no more broken deployments!** Every push to `test-deploy` or `main` automatically updates your app with proper database migrations.
+
+### Branch Strategy:
+- **`test-deploy`** → Staging environment (if using app-staging.yaml)
+- **`main`** → Production environment (using app.yaml) 
