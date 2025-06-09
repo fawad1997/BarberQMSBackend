@@ -97,9 +97,7 @@ def create_shop(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot create more than 10 shops."
-        )
-
-    # Handle username validation and availability
+        )    # Handle username validation and availability - username is now required
     username = None
     if shop_in.username:
         try:
@@ -114,8 +112,16 @@ def create_shop(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
-
-    # Generate slug if not provided
+    else:
+        # Generate username from shop name if not provided
+        base_username = schemas.generate_slug(shop_in.name)
+        username = base_username
+        counter = 1
+        
+        # Ensure username is unique
+        while not schemas.is_username_available(username, db):
+            username = f"{base_username}-{counter}"
+            counter += 1# Generate slug if not provided
     if not shop_in.slug:
         base_slug = schemas.generate_slug(shop_in.name)
         slug = base_slug

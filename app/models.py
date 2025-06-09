@@ -81,6 +81,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.USER)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_first_login = Column(Boolean, default=True)  # Track first-time login
     
     # Password reset fields
     reset_token = Column(String, nullable=True, index=True)
@@ -309,7 +310,8 @@ class ScheduleRepeatFrequency(enum.Enum):
     NONE = "NONE"
     DAILY = "DAILY"
     WEEKLY = "WEEKLY"
-    WEEKLY_NO_WEEKENDS = "WEEKLY_NO_WEEKENDS"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
 
     @classmethod
     def _missing_(cls, value):
@@ -391,7 +393,11 @@ class ScheduleOverride(Base):
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
     start_date = Column(DateTime(timezone=True), nullable=True)
     end_date = Column(DateTime(timezone=True), nullable=True)
-    repeat_frequency = Column(String, nullable=True)
+    repeat_frequency = Column(
+        Enum(ScheduleRepeatFrequency, name="schedulerepeatfrequency", create_constraint=False),
+        nullable=False,
+        server_default="NONE"
+    )
 
     # Relationships
     barber = relationship("Barber", back_populates="schedule_overrides")

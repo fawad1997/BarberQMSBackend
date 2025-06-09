@@ -122,6 +122,7 @@ class UserResponse(UserBase):
     is_active: bool
     role: UserRole
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
@@ -259,7 +260,7 @@ class ShopBase(BaseModel):
     is_open: Optional[bool] = None
     formatted_hours: Optional[str] = None
     slug: str
-    username: Optional[str] = None
+    username: str  # Username is now required
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -276,13 +277,11 @@ class ShopCreate(BaseModel):
     average_wait_time: Optional[float] = 0.0
     operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
     slug: Optional[str] = None
-    username: Optional[str] = None
+    username: str  # Username is now required
 
     @field_validator('username')
     def validate_username_field(cls, v):
-        if v is not None:
-            return validate_username(v)
-        return v
+        return validate_username(v)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -537,6 +536,7 @@ class TokenWithUserDetails(Token):
     role: UserRole
     is_active: bool
     created_at: datetime
+    is_first_login: bool
 
     @field_validator('created_at')
     def validate_created_at(cls, v):
@@ -817,7 +817,34 @@ class ScheduleOverrideBase(BaseModel):
     shop_id: int
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    repeat_frequency: Optional[str] = None
+    repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+
+    @field_validator("repeat_frequency", mode="before")
+    def validate_repeat_frequency(cls, v):
+        if v is None:
+            return ScheduleRepeatFrequency.NONE
+        if isinstance(v, str):
+            try:
+                return ScheduleRepeatFrequency[v.upper()]
+            except KeyError:
+                return ScheduleRepeatFrequency.NONE
+        return v
+
+    @field_validator("start_date", "end_date")
+    def validate_dates(cls, v):
+        if v is not None and v.tzinfo is None:
+            v = v.replace(tzinfo=timezone.utc)
+        return v
+
+    @field_validator("end_date")
+    def validate_end_date(cls, v, info):
+        if v is not None and "start_date" in info.data and info.data["start_date"] is not None:
+            start_date = info.data["start_date"]
+            if v <= start_date:
+                raise ValueError("End date must be after start date")
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
 
 class ScheduleOverrideCreate(ScheduleOverrideBase):
     pass

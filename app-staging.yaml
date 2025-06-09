@@ -1,0 +1,84 @@
+# DigitalOcean App Platform Specification - STAGING ENVIRONMENT
+# This file defines your staging app structure and deployment configuration
+
+name: barber-qms-backend-staging
+region: nyc
+
+# Database component (staging database)
+databases:
+  - name: barber-qms-db-staging
+    engine: PG
+    version: "15"
+    size: db-s-1vcpu-1gb  # Smaller for staging
+    num_nodes: 1
+    production: false  # Staging environment
+
+# Pre-deploy job for database migrations
+jobs:
+  - name: db-migrate-staging
+    kind: PRE_DEPLOY
+    source_dir: /
+    github:
+      repo: fawad1997/BarberQMSBackend
+      branch: test-deploy  # Staging uses test-deploy branch
+    dockerfile_path: Dockerfile
+    run_command: cd /app && python -m alembic upgrade head
+    environment_slug: python
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${barber-qms-db-staging.DATABASE_URL}
+      - key: ENVIRONMENT
+        scope: RUN_AND_BUILD_TIME
+        value: staging
+      - key: PYTHONPATH
+        scope: RUN_AND_BUILD_TIME
+        value: /app
+
+# Main FastAPI service
+services:
+  - name: web-staging
+    source_dir: /
+    github:
+      repo: fawad1997/BarberQMSBackend
+      branch: test-deploy  # Staging uses test-deploy branch
+    dockerfile_path: Dockerfile
+    run_command: uvicorn main:app --host 0.0.0.0 --port 8080
+    environment_slug: python
+    instance_count: 1
+    instance_size_slug: basic-xxs  # Smaller for staging
+    
+    # Port configuration
+    http_port: 8080
+    
+    # Health check configuration
+    health_check:
+      http_path: /ping
+      port: 8080
+      initial_delay_seconds: 15
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    
+    # Environment variables
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${barber-qms-db-staging.DATABASE_URL}
+      - key: ENVIRONMENT
+        scope: RUN_AND_BUILD_TIME
+        value: staging
+      - key: SECRET_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+        value: barber_qms_staging_secret_key_2024
+      - key: JWT_SECRET_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+        value: barber_qms_staging_jwt_secret_2024
+      - key: PYTHONPATH
+        scope: RUN_AND_BUILD_TIME
+        value: /app 

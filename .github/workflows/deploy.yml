@@ -1,0 +1,161 @@
+# .github/workflows/deploy.yml
+
+name: Test and Deploy to DigitalOcean App Platform
+
+# Trigger on push to test-deploy and main branches
+on:
+  push:
+    branches: [ test-deploy, main ]
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    name: 🧪 Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_barber_qms
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio httpx
+        
+    - name: 🔧 Setup test environment
+      run: |
+        cp .env.example .env || echo "No .env.example found, creating basic .env"
+        echo "DATABASE_URL=postgresql://test_user:test_password@localhost:5432/test_barber_qms" >> .env
+        echo "SECRET_KEY=test_secret_key_for_github_actions" >> .env
+        echo "ENVIRONMENT=testing" >> .env
+        
+    - name: 🧪 Run database migrations
+      run: |
+        alembic upgrade head
+        
+    - name: 🧪 Run tests
+      run: |
+        # Run basic health check and import tests
+        python -c "
+        import sys
+        try:
+            from main import app
+            from app import models, schemas
+            print('✅ Application imports successfully')
+        except Exception as e:
+            print(f'❌ Import error: {e}')
+            sys.exit(1)
+        "
+        
+        # Run pytest if test files exist
+        if [ -d "tests/" ]; then
+          pytest tests/ -v
+        else
+          echo "⚠️ No tests directory found, skipping pytest"
+        fi
+
+  lint:
+    name: 🔍 Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+        
+    - name: 🔍 Run linting checks
+      run: |
+        # Check Python formatting
+        black --check . || echo "⚠️ Black formatting issues found"
+        
+        # Check import sorting
+        isort --check-only . || echo "⚠️ Import sorting issues found"
+        
+        # Check for basic Python errors
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || echo "⚠️ Critical linting issues found"
+
+  # Optional: Trigger App Platform deployment via API
+  trigger-deploy:
+    name: 🚀 Trigger App Platform Deployment
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/test-deploy' || github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 🚀 Trigger DigitalOcean App Platform Deployment
+      run: |
+        echo "🎯 Tests passed! App Platform will automatically deploy from this branch."
+        echo "🔍 Monitor deployment at: https://cloud.digitalocean.com/apps"
+        
+        # Optional: Use DO API to trigger deployment programmatically
+        if [ -n "${{ secrets.DO_TOKEN }}" ] && [ -n "${{ secrets.DO_APP_ID }}" ]; then
+          echo "📡 Triggering deployment via DigitalOcean API..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.DO_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://api.digitalocean.com/v2/apps/${{ secrets.DO_APP_ID }}/deployments" \
+            -d '{"forced_build": true}'
+          echo "✅ Deployment triggered successfully!"
+        else
+          echo "ℹ️ App Platform will auto-deploy from connected branch"
+        fi
+
+  notify:
+    name: 📱 Send Notifications
+    needs: [trigger-deploy]
+    runs-on: ubuntu-latest
+    if: always() && (github.ref == 'refs/heads/test-deploy' || github.ref == 'refs/heads/main')
+    
+    steps:
+    - name: 📱 Deployment Status Notification
+      if: always()
+      run: |
+        if [ "${{ needs.trigger-deploy.result }}" == "success" ]; then
+          echo "🎉 BarberQMS Backend ready for deployment!"
+          echo "🌐 Check App Platform: https://cloud.digitalocean.com/apps"
+        else
+          echo "❌ Pre-deployment checks failed!"
+          echo "🔍 Check the logs above for details" 
