@@ -128,6 +128,7 @@ async def ping():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for deployment verification"""
+    # Force migration deployment - 2025-06-09
     try:
         health_data = {
             "status": "healthy",
