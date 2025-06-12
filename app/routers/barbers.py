@@ -1,7 +1,7 @@
 # app/routers/barbers.py
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from app import models, schemas
@@ -108,10 +108,6 @@ def get_my_schedules(
     
     # If start_date and end_date are provided, filter schedules within that range
     if start_date and end_date:
-        # Ensure dates are timezone-aware
-        start_date = ensure_timezone_aware(start_date)
-        end_date = ensure_timezone_aware(end_date)
-        
         # Get all schedules that might overlap with the date range
         schedules = query.filter(
             or_(
@@ -229,3 +225,91 @@ def get_my_feedback(
         models.Feedback.barber_id == barber.id
     ).all()
     return feedbacks
+
+@router.get("/metrics", response_model=schemas.BarberMetrics)
+def get_barber_metrics(
+    time_period: str = "week",  # day, week, month
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_barber)
+):
+    """
+    Get performance metrics for the current barber.
+    - time_period: Filter by day, week, or month
+    """
+    from datetime import timedelta, date
+    import calendar
+    from sqlalchemy import func
+    
+    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber profile not found")
+    
+    # Calculate date range based on time_period
+    today = datetime.now().date()
+    if time_period == "day":
+        start_date = today
+        end_date = today
+    elif time_period == "week":
+        # Start from Monday of current week
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+    elif time_period == "month":
+        # Start from first day of current month
+        start_date = today.replace(day=1)
+        end_date = today
+    else:
+        raise HTTPException(status_code=400, detail="Invalid time period. Use 'day', 'week', or 'month'")
+    
+    # Convert dates to datetime for database query
+    start_datetime = datetime.combine(start_date, datetime.min.time())
+    end_datetime = datetime.combine(end_date, datetime.max.time())
+      # Count completed appointments (customers served)
+    customers_served = db.query(models.Appointment).filter(
+        models.Appointment.barber_id == barber.id,
+        models.Appointment.status == AppointmentStatus.COMPLETED,
+        models.Appointment.appointment_time.between(start_datetime, end_datetime)
+    ).count()
+    
+    # Calculate average service duration
+    service_durations = db.query(
+        (models.Appointment.actual_end_time - models.Appointment.actual_start_time)
+    ).filter(
+        models.Appointment.barber_id == barber.id,
+        models.Appointment.status == AppointmentStatus.COMPLETED,
+        models.Appointment.appointment_time.between(start_datetime, end_datetime),
+        models.Appointment.actual_start_time.isnot(None),
+        models.Appointment.actual_end_time.isnot(None)    ).all()
+    
+    avg_service_duration_minutes = 0
+    if service_durations:
+        total_minutes = sum([(duration[0].total_seconds() / 60) for duration in service_durations if duration[0]])
+        avg_service_duration_minutes = round(total_minutes / len(service_durations))
+    
+    # Get daily breakdown data
+    daily_data = []
+    current_date = start_date
+    while current_date <= end_date:
+        day_start = datetime.combine(current_date, datetime.min.time())
+        day_end = datetime.combine(current_date, datetime.max.time())
+        
+        daily_count = db.query(models.Appointment).filter(
+            models.Appointment.barber_id == barber.id,
+            models.Appointment.status == AppointmentStatus.COMPLETED,
+            models.Appointment.appointment_time.between(day_start, day_end)
+        ).count()
+        
+        daily_data.append({
+            "date": current_date.strftime("%Y-%m-%d"),
+            "customers_served": daily_count
+        })
+        
+        current_date += timedelta(days=1)
+    
+    return {
+        "time_period": time_period,
+        "start_date": start_date.strftime("%Y-%m-%d"),
+        "end_date": end_date.strftime("%Y-%m-%d"),
+        "customers_served": customers_served,
+        "avg_service_duration_minutes": avg_service_duration_minutes,
+        "daily_data": daily_data
+    }

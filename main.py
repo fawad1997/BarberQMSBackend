@@ -1,7 +1,6 @@
 # main.py
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from datetime import datetime
 from app.routers import (
     auth,
     users,
@@ -12,8 +11,7 @@ from app.routers import (
     queue,
     feedback,
     unregistered_users,
-    sso_routes,
-    schedules
+    sso_routes
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,8 +44,6 @@ origins = [
     "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
-    "https://walkinonline.app",
-    "https://www.walkinonline.app",
     "*"
 ]
 
@@ -113,46 +109,11 @@ app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
 app.include_router(websocket_router)  # Include WebSocket router
-app.include_router(schedules.router)  # Add the new schedules router
 
 
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
-
-@app.get("/ping")
-async def ping():
-    """Simple ping endpoint for basic connectivity testing"""
-    return {"status": "ok", "message": "pong"}
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for deployment verification"""
-    try:
-        health_data = {
-            "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
-            "environment": os.getenv("ENVIRONMENT", "development"),
-            "version": "1.0.0"
-        }
-        
-        # Optional: Add database connectivity check in production
-        try:
-            from app.database import SessionLocal
-            db = SessionLocal()
-            # Simple query to test DB connection
-            db.execute("SELECT 1")
-            db.close()
-            health_data["database"] = "connected"
-        except Exception as db_error:
-            # Don't fail health check for DB issues during startup
-            logger.warning(f"Database connection warning: {db_error}")
-            health_data["database"] = "warning"
-        
-        return health_data
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
 @app.get("/favicon.ico")
 async def favicon():
@@ -162,6 +123,7 @@ async def favicon():
         return FileResponse(favicon_path, media_type="image/x-icon")
     else:
         # Return a 404 if favicon not found
+        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Favicon not found")
 
 # Debug route to capture and analyze the redirect issue
