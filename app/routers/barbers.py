@@ -1,15 +1,15 @@
 # app/routers/barbers.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
-from datetime import datetime
+from typing import List, Optional
+from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
 from app.core.dependencies import get_current_user_by_role
 from app.models import UserRole, AppointmentStatus
 from app.utils.schedule_utils import get_recurring_instances, check_schedule_conflicts
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 
 router = APIRouter(prefix="/barbers", tags=["Barbers"])
 
