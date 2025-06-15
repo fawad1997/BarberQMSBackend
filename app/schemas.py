@@ -358,6 +358,17 @@ class BarberResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class BarberProfileResponse(BaseModel):
+    id: int
+    user_id: int
+    shop_id: int
+    full_name: str
+    email: str
+    phone_number: str
+    shop: dict
+
+    model_config = ConfigDict(from_attributes=True)
+
 class BarberBase(BaseModel):
     full_name: str
     email: EmailStr

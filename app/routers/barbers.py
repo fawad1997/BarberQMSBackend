@@ -15,6 +15,40 @@ router = APIRouter(prefix="/barbers", tags=["Barbers"])
 
 get_current_barber = get_current_user_by_role(UserRole.BARBER)
 
+@router.get("/profile", response_model=schemas.BarberProfileResponse)
+def get_barber_profile(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_barber)
+):
+    """Get the current barber's profile information including shop details"""
+    barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    # Get shop information
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    return {
+        "id": barber.id,
+        "user_id": barber.user_id,
+        "shop_id": barber.shop_id,
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "phone_number": current_user.phone_number,
+        "shop": {
+            "id": shop.id,
+            "name": shop.name,
+            "address": shop.address,
+            "phone_number": shop.phone_number,
+            "username": shop.username,
+            "formatted_hours": "9:00 AM - 6:00 PM",  # You can implement actual hours logic later
+            "is_open": True,  # You can implement actual open/closed logic later
+            "estimated_wait_time": 15  # You can implement actual wait time calculation later
+        }
+    }
+
 @router.get("/appointments/", response_model=List[schemas.AppointmentResponse])
 def get_my_appointments(
     db: Session = Depends(get_db),
