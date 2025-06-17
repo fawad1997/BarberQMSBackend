@@ -110,6 +110,97 @@ class EmailService:
             logger.error(f"Error sending password reset email: {str(e)}")
             return False
     
+    def send_artist_onboarding_email(self, to_email: str, reset_token: str, user_name: str, shop_name: str) -> bool:
+        """Send onboarding email to a newly added artist with password setup link"""
+        try:
+            # Create reset link using backend-served page
+            setup_link = f"{self.backend_url}/auth/reset-password?token={reset_token}"
+            
+            # Create email content
+            subject = "Welcome to BarberQMS - Set Up Your Account"
+            
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Welcome to BarberQMS</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to BarberQMS</h1>
+                </div>
+                
+                <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #ddd;">
+                    <p style="font-size: 16px; margin-bottom: 20px;">Hello {user_name},</p>
+                    
+                    <p style="font-size: 16px; margin-bottom: 20px;">
+                        You've been added as an artist at {shop_name}. 
+                        To get started, you need to set up your password.
+                    </p>
+                    
+                    <p style="font-size: 16px; margin-bottom: 30px;">
+                        Please click the button below to set up your password and access your account:
+                    </p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{setup_link}" 
+                           style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                  color: white; 
+                                  padding: 15px 30px; 
+                                  text-decoration: none; 
+                                  border-radius: 5px; 
+                                  font-weight: bold; 
+                                  font-size: 16px; 
+                                  display: inline-block;">
+                            Set Up Password
+                        </a>
+                    </div>
+                    
+                    <p style="font-size: 14px; color: #666; margin-top: 30px;">
+                        If the button doesn't work, you can copy and paste this link into your browser:
+                    </p>
+                    <p style="font-size: 14px; color: #667eea; word-break: break-all;">
+                        {setup_link}
+                    </p>
+                    
+                    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
+                        <p style="font-size: 14px; color: #666; margin: 0;">
+                            This link will expire in 1 hour for security reasons.
+                        </p>
+                        <p style="font-size: 14px; color: #666; margin: 10px 0 0 0;">
+                            Best regards,<br>
+                            The BarberQMS Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            text_body = f"""
+            Welcome to BarberQMS
+            
+            Hello {user_name},
+            
+            You've been added as an artist at {shop_name}. To get started, you need to set up your password.
+            
+            Please visit this link to set up your password and access your account:
+            {setup_link}
+            
+            This link will expire in 1 hour for security reasons.
+            
+            Best regards,
+            The BarberQMS Team
+            """
+            
+            return self._send_email(to_email, subject, html_body, text_body)
+            
+        except Exception as e:
+            logger.error(f"Error sending artist onboarding email: {str(e)}")
+            return False
+    
     def _send_email(self, to_email: str, subject: str, html_body: str, text_body: str) -> bool:
         """Send email using SMTP"""
         try:
@@ -148,4 +239,4 @@ class EmailService:
             return False
 
 # Global email service instance
-email_service = EmailService() 
+email_service = EmailService()

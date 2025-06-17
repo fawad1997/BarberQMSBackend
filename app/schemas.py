@@ -378,7 +378,6 @@ class BarberCreate(BaseModel):
     full_name: str
     email: EmailStr
     phone_number: str
-    password: Optional[str] = "Temp1234"
     status: Optional[BarberStatus] = BarberStatus.AVAILABLE
 
 class BarberUpdate(BaseModel):
