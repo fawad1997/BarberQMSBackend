@@ -515,7 +515,6 @@ class BarberScheduleResponseLegacy(BaseModel):
 class LoginRequest(BaseModel):
     username: str  # Can be either email or phone number
     password: str
-    loginType: str = "shop_owner"  # Default to shop_owner if not provided
 
 # Add a new response schema for listing shops
 class ShopListResponse(BaseModel):
