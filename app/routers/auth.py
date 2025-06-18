@@ -81,6 +81,22 @@ async def login_json(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password"
         )
+    
+    # Check if the user's role is supported for login
+    if user.role not in [models.UserRole.BARBER, models.UserRole.SHOP_OWNER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Login not supported for role: {user.role.value}"
+        )
+        
+    # For barbers, verify they have an active barber profile
+    if user.role == models.UserRole.BARBER:
+        barber = db.query(models.Barber).filter(models.Barber.user_id == user.id).first()
+        if not barber:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Barber profile not found. Please contact your shop owner."
+            )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

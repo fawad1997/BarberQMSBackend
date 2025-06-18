@@ -81,8 +81,7 @@ async def create_appointment(
         
         if not is_scheduled:
             raise HTTPException(status_code=400, detail="Barber is not scheduled to work at this time")
-        
-        # Check for conflicting appointments
+          # Check for conflicting appointments
         conflicting_appointments = db.query(models.Appointment).filter(
             models.Appointment.barber_id == barber.id,
             models.Appointment.status == models.AppointmentStatus.SCHEDULED,
@@ -102,12 +101,18 @@ async def create_appointment(
             models.Barber.status == models.BarberStatus.AVAILABLE
         ).all()
         
+        if not barbers:
+            raise HTTPException(status_code=404, detail="No barbers found for this shop. Please contact the shop owner to add barbers.")
+            
         for barber in barbers:
             # Check if barber has any schedule that covers the appointment time
             barber_schedules = db.query(models.BarberSchedule).filter(
                 models.BarberSchedule.barber_id == barber.id
             ).all()
             
+            if not barber_schedules:
+                continue  # Skip barbers with no schedules instead of raising an error
+                
             is_scheduled = False
             for schedule in barber_schedules:
                 instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
@@ -132,7 +137,23 @@ async def create_appointment(
                     available_barbers.append(barber)
         
         if not available_barbers:
-            raise HTTPException(status_code=400, detail="No barbers available at the requested time")
+            # Check if any barbers have schedules but are all booked
+            any_barber_has_schedule = False
+            for barber in barbers:
+                schedules_count = db.query(models.BarberSchedule).filter(
+                    models.BarberSchedule.barber_id == barber.id
+                ).count()
+                if schedules_count > 0:
+                    any_barber_has_schedule = True
+                    break
+                    
+            if any_barber_has_schedule:
+                raise HTTPException(status_code=400, detail="No barbers available at the requested time. Please try a different time or date.")
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="No barber schedules have been set up for this shop. Please contact the shop owner to set up barber working hours."
+                )
         
         # Select the barber with the fewest appointments on that day
         selected_barber = min(

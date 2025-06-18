@@ -480,16 +480,22 @@ async def add_barber(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A user with this phone number already exists but with a different email"
-        )
-
-    # Use existing user if found by email
+        )            # Use existing user if found by email
     user = user_by_email
     
     try:
+        # Import the needed modules
+        import secrets
+        from datetime import timedelta, datetime
+        from app.schemas import TIMEZONE, convert_to_utc
+        from app.utils.email_service import email_service
+        
         if not user:
-            # Create a new user account with default or provided password
-            password = barber_in.password if barber_in.password else "Temp1234"
-            hashed_password = get_password_hash(password)
+            # For new users, create user without a usable password
+            # Password will be set by the artist via the email setup link
+            hashed_password = get_password_hash(secrets.token_urlsafe(32))  # Random unusable password
+            
+            # Create the user
             user = models.User(
                 full_name=barber_in.full_name,
                 email=barber_in.email,
@@ -497,10 +503,32 @@ async def add_barber(
                 hashed_password=hashed_password,
                 role=models.UserRole.BARBER,
                 is_active=True,
+                is_first_login=True
             )
             db.add(user)
             db.commit()
             db.refresh(user)
+            
+            # Generate reset token for the new user to set up their password
+            reset_token = secrets.token_urlsafe(32)
+            pacific_now = convert_to_utc(datetime.now(TIMEZONE))
+            expires_at = pacific_now + timedelta(hours=24)  # Give them 24 hours to set up their account
+            
+            # Set the reset token for the user
+            user.reset_token = reset_token
+            user.reset_token_expires = expires_at
+            db.commit()
+            
+            # Send password setup email
+            email_sent = email_service.send_artist_onboarding_email(
+                to_email=user.email,
+                reset_token=reset_token,
+                user_name=user.full_name,
+                shop_name=shop.name
+            )
+            
+            if not email_sent:
+                logger.error(f"Failed to send artist onboarding email to {user.email}")
         else:
             # User exists, check if they can be made a barber
             if user.role != models.UserRole.USER:
@@ -523,8 +551,26 @@ async def add_barber(
                 
             # Update user's role to barber
             user.role = models.UserRole.BARBER
-            if barber_in.password:  # Update password if provided
-                user.hashed_password = get_password_hash(barber_in.password)
+            
+            # Always send a password setup email for existing users being converted to barbers
+            reset_token = secrets.token_urlsafe(32)
+            pacific_now = convert_to_utc(datetime.now(TIMEZONE))
+            expires_at = pacific_now + timedelta(hours=24)
+            
+            user.reset_token = reset_token
+            user.reset_token_expires = expires_at
+            
+            # Send password setup email
+            email_sent = email_service.send_artist_onboarding_email(
+                to_email=user.email,
+                reset_token=reset_token,
+                user_name=user.full_name,
+                shop_name=shop.name
+            )
+            
+            if not email_sent:
+                logger.error(f"Failed to send artist onboarding email to {user.email}")
+                
             db.add(user)
             db.commit()
 

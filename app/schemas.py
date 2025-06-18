@@ -358,6 +358,17 @@ class BarberResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class BarberProfileResponse(BaseModel):
+    id: int
+    user_id: int
+    shop_id: int
+    full_name: str
+    email: str
+    phone_number: str
+    shop: dict
+
+    model_config = ConfigDict(from_attributes=True)
+
 class BarberBase(BaseModel):
     full_name: str
     email: EmailStr
@@ -367,7 +378,6 @@ class BarberCreate(BaseModel):
     full_name: str
     email: EmailStr
     phone_number: str
-    password: Optional[str] = "Temp1234"
     status: Optional[BarberStatus] = BarberStatus.AVAILABLE
 
 class BarberUpdate(BaseModel):
@@ -885,3 +895,16 @@ class UsernameAvailabilityResponse(BaseModel):
     message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+# Barber metrics schemas
+class DailyMetric(BaseModel):
+    date: str
+    customers_served: int
+
+class BarberMetrics(BaseModel):
+    time_period: str
+    start_date: str
+    end_date: str
+    customers_served: int
+    avg_service_duration_minutes: int
+    daily_data: List[DailyMetric]
