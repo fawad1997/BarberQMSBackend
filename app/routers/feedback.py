@@ -15,19 +15,28 @@ def create_feedback(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    appointment = db.query(models.Appointment).filter(
-        models.Appointment.id == feedback_in.appointment_id,
-        models.Appointment.user_id == current_user.id
-    ).first()
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found or not associated with current user")
+    # Verify business exists
+    business = db.query(models.Business).filter(models.Business.id == feedback_in.business_id).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Verify employee exists if provided
+    if feedback_in.employee_id:
+        employee = db.query(models.Employee).filter(
+            models.Employee.id == feedback_in.employee_id,
+            models.Employee.business_id == feedback_in.business_id
+        ).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found in this business")
 
     new_feedback = models.Feedback(
-        appointment_id=feedback_in.appointment_id,
         user_id=current_user.id,
-        barber_id=appointment.barber_id,
+        business_id=feedback_in.business_id,
+        employee_id=feedback_in.employee_id,
         rating=feedback_in.rating,
-        comment=feedback_in.comment
+        message=feedback_in.message,
+        subject=feedback_in.subject,
+        category=feedback_in.category
     )
     db.add(new_feedback)
     db.commit()
