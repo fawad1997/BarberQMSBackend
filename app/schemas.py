@@ -3,7 +3,7 @@
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
 from typing import Optional, List
 from datetime import datetime, timezone, time, timedelta, date
-from app.models import AppointmentStatus, BarberStatus, QueueStatus, ScheduleRepeatFrequency
+from app.models import AppointmentStatus, EmployeeStatus, QueueStatus, ScheduleRepeatFrequency, OverrideType
 from enum import Enum
 import pytz
 import re
@@ -59,9 +59,9 @@ def generate_slug(name: str) -> str:
     slug = slug.strip('-')
     return slug
 
-# Reserved usernames that cannot be used by shops
+# Reserved usernames that cannot be used by businesses
 RESERVED_USERNAMES = {
-    "my-shop", "barbershop", "barber-shop", "my-barber-shop",
+    "my-business", "barbershop", "barber-shop", "my-barber-shop",
     "admin", "api", "www", "mail", "ftp", "localhost", "test",
     "support", "help", "contact", "about", "privacy", "terms",
     "login", "register", "signup", "dashboard", "profile", "settings"
@@ -95,13 +95,13 @@ def validate_username(username: str) -> str:
     
     return username
 
-def is_username_available(username: str, db, exclude_shop_id: Optional[int] = None) -> bool:
-    """Check if username is available (not taken by another shop)"""
+def is_username_available(username: str, db, exclude_business_id: Optional[int] = None) -> bool:
+    """Check if username is available (not taken by another business)"""
     from app import models
     
-    query = db.query(models.Shop).filter(models.Shop.username == username)
-    if exclude_shop_id:
-        query = query.filter(models.Shop.id != exclude_shop_id)
+    query = db.query(models.Business).filter(models.Business.username == username)
+    if exclude_business_id:
+        query = query.filter(models.Business.id != exclude_business_id)
     
     return query.first() is None
 
@@ -155,8 +155,8 @@ class TokenData(BaseModel):
     user_id: Optional[int] = None
 
 class AppointmentBase(BaseModel):
-    shop_id: int
-    barber_id: Optional[int] = None
+    business_id: int
+    employee_id: Optional[int] = None
     service_id: Optional[int] = None
     appointment_time: datetime
     end_time: Optional[datetime] = None
@@ -178,6 +178,7 @@ class AppointmentCreate(AppointmentBase):
     user_id: Optional[int] = None
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
+    notes: Optional[str] = None
 
     @field_validator('full_name', 'phone_number')
     def validate_guest_fields(cls, v, info):
@@ -218,6 +219,9 @@ class AppointmentResponse(AppointmentBase):
     actual_end_time: Optional[datetime] = None
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
+    total_duration: Optional[int] = None
+    total_price: Optional[float] = None
+    notes: Optional[str] = None
 
     # Add validator for all datetime fields
     @field_validator('created_at', 'actual_start_time', 'actual_end_time', 'end_time')
@@ -228,18 +232,20 @@ class AppointmentResponse(AppointmentBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopOperatingHoursBase(BaseModel):
+class BusinessOperatingHoursBase(BaseModel):
     day_of_week: int = Field(..., ge=0, le=6, description="0=Sunday, 1=Monday, ..., 6=Saturday")
     opening_time: Optional[time] = None
     closing_time: Optional[time] = None
     is_closed: bool = False
+    lunch_break_start: Optional[time] = None
+    lunch_break_end: Optional[time] = None
 
-class ShopOperatingHoursCreate(ShopOperatingHoursBase):
+class BusinessOperatingHoursCreate(BusinessOperatingHoursBase):
     pass
 
-class ShopOperatingHoursResponse(ShopOperatingHoursBase):
+class BusinessOperatingHoursResponse(BusinessOperatingHoursBase):
     id: int
-    shop_id: int
+    business_id: int
     
     model_config = ConfigDict(from_attributes=True)
     
@@ -256,7 +262,7 @@ class ShopOperatingHoursResponse(ShopOperatingHoursBase):
             return "Closed"
         return f"{self.opening_time.strftime('%I:%M %p')} - {self.closing_time.strftime('%I:%M %p')}"
 
-class ShopBase(BaseModel):
+class BusinessBase(BaseModel):
     id: int
     name: str
     address: str
@@ -265,24 +271,19 @@ class ShopBase(BaseModel):
     zip_code: str
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    opening_time: time
-    closing_time: time
     average_wait_time: Optional[float] = None
-    has_advertisement: Optional[bool] = False
-    advertisement_image_url: Optional[str] = None
-    advertisement_start_date: Optional[datetime] = None
-    advertisement_end_date: Optional[datetime] = None
-    is_advertisement_active: Optional[bool] = False
     estimated_wait_time: Optional[int] = None
     is_open: Optional[bool] = None
     formatted_hours: Optional[str] = None
     slug: str
     username: str  # Username is now required
-    timezone: str = "America/Los_Angeles"
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
+    is_open_24_hours: Optional[bool] = False
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopCreate(BaseModel):
+class BusinessCreate(BaseModel):
     name: str
     address: str
     city: str
@@ -290,13 +291,12 @@ class ShopCreate(BaseModel):
     zip_code: str
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    opening_time: time
-    closing_time: time
     average_wait_time: Optional[float] = 0.0
-    operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
+    operating_hours: Optional[List[BusinessOperatingHoursCreate]] = None
     slug: Optional[str] = None
     username: str  # Username is now required
-    timezone: str = "America/Los_Angeles"
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
 
     @field_validator('username')
     def validate_username_field(cls, v):
@@ -308,7 +308,7 @@ class ShopCreate(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopUpdate(BaseModel):
+class BusinessUpdate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -316,43 +316,24 @@ class ShopUpdate(BaseModel):
     zip_code: Optional[str] = None
     phone_number: Optional[str] = None
     email: Optional[str] = None
-    opening_time: Optional[time] = None
-    closing_time: Optional[time] = None
     average_wait_time: Optional[float] = None
-    has_advertisement: Optional[bool] = None
-    advertisement_image_url: Optional[str] = None
-    advertisement_start_date: Optional[datetime] = None
-    advertisement_end_date: Optional[datetime] = None
-    is_advertisement_active: Optional[bool] = None
     slug: Optional[str] = None
     username: Optional[str] = None
-    timezone: Optional[str] = None
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
 
     @field_validator('username')
     def validate_username_field(cls, v):
         if v is not None:
             return validate_username(v)
         return v
-    
-    @field_validator('timezone')
-    def validate_timezone_field(cls, v):
-        if v is not None:
-            return validate_us_timezone(v)
-        return v
-
-    # Add validator for dates
-    @field_validator('advertisement_start_date', 'advertisement_end_date')
-    def validate_dates(cls, v):
-        if v is not None:
-            return validate_timezone(v)
-        return v
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopResponse(ShopBase):
+class BusinessResponse(BusinessBase):
     id: int
     owner_id: int
-    operating_hours: List[ShopOperatingHoursResponse] = []
+    operating_hours: List[BusinessOperatingHoursResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -361,6 +342,8 @@ class ServiceBase(BaseModel):
     name: str
     duration: int
     price: float
+    is_active: Optional[bool] = True
+    category: Optional[str] = None
 
 class ServiceCreate(ServiceBase):
     pass
@@ -370,16 +353,16 @@ class ServiceUpdate(ServiceBase):
 
 class ServiceResponse(ServiceBase):
     id: int
-    shop_id: int
+    business_id: int
 
     model_config = ConfigDict(from_attributes=True)
 
-# Then define BarberResponse which uses ServiceResponse
-class BarberResponse(BaseModel):
+# Then define EmployeeResponse which uses ServiceResponse
+class EmployeeResponse(BaseModel):
     id: int
     user_id: int
-    shop_id: int
-    status: BarberStatus
+    business_id: int
+    status: EmployeeStatus
     full_name: str
     email: str
     phone_number: str
@@ -388,124 +371,72 @@ class BarberResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class BarberProfileResponse(BaseModel):
+class EmployeeProfileResponse(BaseModel):
     id: int
     user_id: int
-    shop_id: int
+    business_id: int
     full_name: str
     email: str
     phone_number: str
-    shop: dict
+    business: dict
 
     model_config = ConfigDict(from_attributes=True)
 
-class BarberBase(BaseModel):
+class EmployeeBase(BaseModel):
     full_name: str
     email: EmailStr
     phone_number: str
 
-class BarberCreate(BaseModel):
+class EmployeeCreate(BaseModel):
     full_name: str
     email: EmailStr
     phone_number: str
-    status: Optional[BarberStatus] = BarberStatus.AVAILABLE
+    status: Optional[EmployeeStatus] = EmployeeStatus.AVAILABLE
 
-class BarberUpdate(BaseModel):
+class EmployeeUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
-    status: Optional[BarberStatus] = None
+    status: Optional[EmployeeStatus] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
-class BarberScheduleBase(BaseModel):
-    barber_id: int
-    start_date: datetime
-    end_date: datetime
-    repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+class EmployeeScheduleBase(BaseModel):
+    employee_id: int
+    day_of_week: int = Field(..., ge=0, le=6, description="0=Sunday, 1=Monday, ..., 6=Saturday")
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    lunch_break_start: Optional[time] = None
+    lunch_break_end: Optional[time] = None
+    is_working: bool = True
 
-    @field_validator("repeat_frequency", mode="before")
-    def validate_repeat_frequency(cls, v):
-        if v is None:
-            return ScheduleRepeatFrequency.NONE
-        if isinstance(v, str):
-            try:
-                return ScheduleRepeatFrequency[v.upper()]
-            except KeyError:
-                return ScheduleRepeatFrequency.NONE
-        return v
-
-    @field_validator("start_date", "end_date")
-    def validate_dates(cls, v):
-        if v.tzinfo is None:
-            v = UTC.localize(v)
-        return v.astimezone(TIMEZONE)
-
-    @field_validator("end_date")
-    def validate_end_date(cls, v, info):
-        if "start_date" in info.data:
-            start_date = info.data["start_date"]
-            if v <= start_date:
-                raise ValueError("End date must be after start date")
+    @field_validator("day_of_week")
+    def validate_day_of_week(cls, v):
+        if v < 0 or v > 6:
+            raise ValueError("day_of_week must be between 0 (Sunday) and 6 (Saturday)")
         return v
 
     model_config = ConfigDict(from_attributes=True)
 
-class BarberScheduleCreate(BarberScheduleBase):
+class EmployeeScheduleCreate(EmployeeScheduleBase):
     pass
 
-class BarberScheduleUpdate(BaseModel):
-    start_date: datetime | None = None
-    end_date: datetime | None = None
-    repeat_frequency: ScheduleRepeatFrequency | None = None
-
-    @field_validator("repeat_frequency", mode="before")
-    def validate_repeat_frequency(cls, v):
-        if v is None:
-            return ScheduleRepeatFrequency.NONE
-        if isinstance(v, str):
-            try:
-                return ScheduleRepeatFrequency[v.upper()]
-            except KeyError:
-                return ScheduleRepeatFrequency.NONE
-        return v
-
-    @field_validator("start_date", "end_date")
-    def validate_dates(cls, v):
-        if v is not None and v.tzinfo is None:
-            v = v.replace(tzinfo=timezone.utc)
-        return v
+class EmployeeScheduleUpdate(BaseModel):
+    day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    lunch_break_start: Optional[time] = None
+    lunch_break_end: Optional[time] = None
+    is_working: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-class BarberSchedule(BarberScheduleBase):
+class EmployeeScheduleResponse(EmployeeScheduleBase):
     id: int
     created_at: datetime
     updated_at: datetime
 
     @field_validator('created_at', 'updated_at')
-    def validate_timestamps(cls, v):
-        if v is not None:
-            # Convert to UTC if timezone-naive
-            if v.tzinfo is None:
-                v = timezone.utc.localize(v)
-            else:
-                v = v.astimezone(timezone.utc)
-        return v
-
-    class Config:
-        from_attributes = True
-
-class BarberScheduleResponse(BaseModel):
-    id: int
-    barber_id: int
-    start_date: datetime
-    end_date: datetime
-    repeat_frequency: ScheduleRepeatFrequency
-    created_at: datetime
-    updated_at: datetime
-
-    @field_validator('start_date', 'end_date', 'created_at', 'updated_at')
     def validate_dates(cls, v):
         if v is not None:
             # Convert to UTC if timezone-naive
@@ -515,58 +446,32 @@ class BarberScheduleResponse(BaseModel):
             return v.astimezone(TIMEZONE)
         return v
 
+    @computed_field
+    def day_name(self) -> str:
+        days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        return days[self.day_of_week]
+
+    @computed_field
+    def formatted_time(self) -> str:
+        if not self.is_working or not self.start_time or not self.end_time:
+            return "Not Working"
+        return f"{self.start_time.strftime('%I:%M %p')} - {self.end_time.strftime('%I:%M %p')}"
+
     model_config = ConfigDict(from_attributes=True)
-
-# Keep the old response schema for backward compatibility
-class BarberScheduleResponseLegacy(BaseModel):
-    id: int
-    barber_id: int
-    shop_id: int
-    day_of_week: int
-    start_time: time   # Format handled by Pydantic
-    end_time: time     # Format handled by Pydantic
-
-    class Config:
-        from_attributes = True  # Enables ORM mode for Pydantic
-
-    @classmethod
-    def from_orm_with_shop(cls, obj):
-        return cls(
-            id=obj.id,
-            barber_id=obj.barber_id,
-            shop_id=obj.barber.shop_id,  # Access shop_id through the barber relationship
-            day_of_week=obj.day_of_week,
-            start_time=obj.start_time,
-            end_time=obj.end_time
-        )
-
 
 # Update login schema
 class LoginRequest(BaseModel):
     username: str  # Can be either email or phone number
     password: str
 
-# Add a new response schema for listing shops
-class ShopListResponse(BaseModel):
-    items: List[ShopBase]
+# Add a new response schema for listing businesses
+class BusinessListResponse(BaseModel):
+    items: List[BusinessBase]
     total: int
     page: int
     pages: int
 
     model_config = ConfigDict(from_attributes=True)
-
-class AdvertisementUpdate(BaseModel):
-    has_advertisement: bool
-    advertisement_image_url: Optional[str] = None
-    advertisement_start_date: Optional[datetime] = None
-    advertisement_end_date: Optional[datetime] = None
-    is_advertisement_active: Optional[bool] = None
-
-    @field_validator('advertisement_start_date', 'advertisement_end_date')
-    def validate_dates(cls, v):
-        if v is not None:
-            return validate_timezone(v)
-        return v
 
 class TokenWithUserDetails(Token):
     user_id: int
@@ -587,14 +492,14 @@ class TokenWithUserDetails(Token):
 class QueueStatusUpdate(BaseModel):
     status: QueueStatus
 
-class QueueBarberUpdate(BaseModel):
-    barber_id: int
+class QueueEmployeeUpdate(BaseModel):
+    employee_id: int
 
 class QueueServiceUpdate(BaseModel):
     service_id: int
 
 class QueueEntryBase(BaseModel):
-    shop_id: int
+    business_id: int
     user_id: Optional[int] = None
     service_id: Optional[int] = None
     full_name: Optional[str] = None
@@ -611,9 +516,9 @@ class ServiceInfo(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class BarberInfo(BaseModel):
+class EmployeeInfo(BaseModel):
     id: int
-    status: BarberStatus
+    status: EmployeeStatus
     full_name: str
     phone_number: Optional[str] = None
     email: Optional[str] = None
@@ -627,13 +532,15 @@ class QueueEntryResponse(QueueEntryBase):
     check_in_time: datetime
     service_start_time: Optional[datetime] = None
     service_end_time: Optional[datetime] = None
-    barber_id: Optional[int] = None
+    estimated_service_time: Optional[datetime] = None
+    employee_id: Optional[int] = None
     number_of_people: int = 1
-    barber: Optional[BarberInfo] = None
+    notes: Optional[str] = None
+    employee: Optional[EmployeeInfo] = None
     service: Optional[ServiceInfo] = None
 
     # Add validators for all datetime fields
-    @field_validator('check_in_time', 'service_start_time', 'service_end_time')
+    @field_validator('check_in_time', 'service_start_time', 'service_end_time', 'estimated_service_time')
     def validate_times(cls, v):
         if v is not None:
             return validate_timezone(v)
@@ -648,8 +555,9 @@ class DailyReportResponse(BaseModel):
 
 class FeedbackBase(BaseModel):
     rating: int
-    comment: Optional[str] = None
-    shop_id: int
+    message: Optional[str] = None  # Renamed from comment
+    subject: Optional[str] = None
+    business_id: int
 
 class FeedbackCreate(FeedbackBase):
     pass
@@ -665,32 +573,15 @@ class FeedbackResponse(FeedbackBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-class ShopDetailedBarberSchedule(BarberScheduleResponse):
-    @computed_field
-    def formatted_time(self) -> str:
-        # Convert times to Pacific timezone for display
-        start = self.start_date
-        end = self.end_date
-        
-        # Ensure times are in Pacific timezone
-        if start.tzinfo is None:
-            start = TIMEZONE.localize(start)
-        if end.tzinfo is None:
-            end = TIMEZONE.localize(end)
-        
-        return f"{start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}"
+class BusinessDetailedEmployeeSchedule(EmployeeScheduleResponse):
+    pass
 
-    @computed_field
-    def day_name(self) -> str:
-        # Get the day name from the start date
-        return self.start_date.strftime('%A')
-
-class ShopDetailedBarber(BarberResponse):
-    schedules: List[ShopDetailedBarberSchedule] = []
+class BusinessDetailedEmployee(EmployeeResponse):
+    schedules: List[BusinessDetailedEmployeeSchedule] = []
     services: List[ServiceResponse] = []
 
-class ShopDetailedResponse(ShopResponse):
-    barbers: List[ShopDetailedBarber] = []
+class BusinessDetailedResponse(BusinessResponse):
+    employees: List[BusinessDetailedEmployee] = []
     services: List[ServiceResponse] = []
     estimated_wait_time: Optional[int] = None
     is_open: bool = False
@@ -698,44 +589,37 @@ class ShopDetailedResponse(ShopResponse):
 
     model_config = ConfigDict(from_attributes=True)
 
-
 class QueueEntryCreatePublic(BaseModel):
-    shop_id: int
+    business_id: int
     service_id: Optional[int] = None
-    barber_id: Optional[int] = None
+    employee_id: Optional[int] = None
     full_name: str
     phone_number: str
     number_of_people: int = Field(default=1, ge=1)
-
-def validate_timezone(dt: datetime) -> datetime:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(TIMEZONE)
+    notes: Optional[str] = None
 
 class QueueEntryPublicResponse(BaseModel):
-    shop_id: int
+    business_id: int
     id: int
     position_in_queue: int
     full_name: str
     status: QueueStatus
     check_in_time: datetime
     service_start_time: Optional[datetime] = None
+    estimated_service_time: Optional[datetime] = None
     number_of_people: int
-    barber_id: Optional[int] = None
+    employee_id: Optional[int] = None
     service_id: Optional[int] = None
     estimated_wait_time: Optional[int] = None  # <-- New Field in minutes
+    notes: Optional[str] = None
 
-    @field_validator('check_in_time', 'service_start_time', mode='before')
+    @field_validator('check_in_time', 'service_start_time', 'estimated_service_time', mode='before')
     def validate_times(cls, v):
         if v is None:
             return None
         return validate_timezone(v)
 
-
     model_config = ConfigDict(from_attributes=True)
-
 
 class QueueReorderItem(BaseModel):
     queue_id: int
@@ -745,27 +629,24 @@ class QueueReorderRequest(BaseModel):
     reordered_entries: List[QueueReorderItem]
 
 class DetailedAppointmentResponse(AppointmentResponse):
-    barber: Optional[BarberInfo] = None
+    employee: Optional[EmployeeInfo] = None
     service: Optional[ServiceInfo] = None
     
     @computed_field
     def duration_minutes(self) -> int:
-        print('duration_minutes->',self.full_name, self.end_time, self.appointment_time)
-
         if self.end_time and self.appointment_time:
-            # Convert both to UTC, assuming naive datetimes are in local time (you can adjust this)
+            # Convert both to UTC, assuming naive datetimes are in local time
             end = self.end_time.astimezone(timezone.utc) if self.end_time.tzinfo else self.end_time.replace(tzinfo=timezone.utc)
             start = self.appointment_time.astimezone(timezone.utc) if self.appointment_time.tzinfo else self.appointment_time.replace(tzinfo=timezone.utc)
-            print('end->', end, 'start->', start, 'duration->', int((end - start).total_seconds() / 60))
             return int((end - start).total_seconds() / 60)
-
         return 30  # Default duration
+    
     model_config = ConfigDict(from_attributes=True)
 
 class DisplayQueueItem(BaseModel):
     id: int
-    shop_id: int
-    shop_name: str
+    business_id: int
+    business_name: str
     display_id: str  # W1, A2, etc.
     name: str
     type: str  # "Walk-in" or "Appointment"
@@ -783,19 +664,20 @@ class DisplayQueueItem(BaseModel):
         return v
 
 class SimplifiedQueueResponse(BaseModel):
-    shop_id: int
-    shop_name: str
+    business_id: int
+    business_name: str
     current_time: str
     queue: List[dict] = []
 
 class AppointmentUpdate(BaseModel):
     appointment_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    barber_id: Optional[int] = None
+    employee_id: Optional[int] = None
     service_id: Optional[int] = None
     number_of_people: Optional[int] = Field(default=None, ge=1)
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
+    notes: Optional[str] = None
 
     @field_validator('appointment_time')
     def validate_appointment_time(cls, v):
@@ -814,54 +696,14 @@ class AppointmentUpdate(BaseModel):
         # Allow updating individual fields
         return v
 
-class ScheduleBreakBase(BaseModel):
-    break_start: Optional[time] = None
-    break_end: Optional[time] = None
-
-class ScheduleBreakCreate(ScheduleBreakBase):
-    pass
-
-class ScheduleBreakResponse(ScheduleBreakBase):
-    id: int
-    work_schedule_id: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-class WorkScheduleBase(BaseModel):
-    name: Optional[str] = None
-    day_of_week: Optional[List[int]] = None
-    start_time: Optional[time] = None
-    end_time: Optional[time] = None
-    effective_start_date: Optional[date] = None
-    effective_end_date: Optional[date] = None
-
-class WorkScheduleCreate(WorkScheduleBase):
-    shop_id: int
-    breaks: Optional[List[ScheduleBreakCreate]] = None
-
-class WorkScheduleResponse(WorkScheduleBase):
-    id: int
-    shop_id: int
-    breaks: List[ScheduleBreakResponse] = []
-
-    model_config = ConfigDict(from_attributes=True)
-
-class EmployeeScheduleBase(BaseModel):
-    employee_id: int
-    work_schedule_id: int
-
-class EmployeeScheduleCreate(EmployeeScheduleBase):
-    pass
-
-class EmployeeScheduleResponse(EmployeeScheduleBase):
-    model_config = ConfigDict(from_attributes=True)
-
 class ScheduleOverrideBase(BaseModel):
-    barber_id: Optional[int] = None
-    shop_id: int
+    employee_id: Optional[int] = None
+    business_id: int
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     repeat_frequency: ScheduleRepeatFrequency = ScheduleRepeatFrequency.NONE
+    reason: Optional[str] = None
+    override_type: Optional[OverrideType] = None
 
     @field_validator("repeat_frequency", mode="before")
     def validate_repeat_frequency(cls, v):
@@ -930,15 +772,59 @@ class UsernameAvailabilityResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-# Barber metrics schemas
+# Employee metrics schemas
 class DailyMetric(BaseModel):
     date: str
     customers_served: int
 
-class BarberMetrics(BaseModel):
+class EmployeeMetrics(BaseModel):
     time_period: str
     start_date: str
     end_date: str
     customers_served: int
     avg_service_duration_minutes: int
     daily_data: List[DailyMetric]
+
+# Business Advertisement schemas
+class BusinessAdvertisementBase(BaseModel):
+    business_id: int
+    image_url: str
+    start_date: datetime
+    end_date: datetime
+    is_active: bool = True
+
+class BusinessAdvertisementCreate(BusinessAdvertisementBase):
+    pass
+
+class BusinessAdvertisementResponse(BusinessAdvertisementBase):
+    id: int
+    created_at: datetime
+
+    @field_validator('start_date', 'end_date', 'created_at')
+    def validate_dates(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Contact Message schemas
+class ContactMessageCreate(BaseModel):
+    subject: str
+    message: str
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+
+class ContactMessageResponse(BaseModel):
+    id: int
+    subject: str
+    message: str
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    created_at: datetime
+
+    @field_validator('created_at')
+    def validate_created_at(cls, v):
+        return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)

@@ -110,8 +110,8 @@ class EmailService:
             logger.error(f"Error sending password reset email: {str(e)}")
             return False
     
-    def send_artist_onboarding_email(self, to_email: str, reset_token: str, user_name: str, shop_name: str) -> bool:
-        """Send onboarding email to a newly added artist with password setup link"""
+    def send_employee_onboarding_email(self, to_email: str, reset_token: str, user_name: str, business_name: str) -> bool:
+        """Send onboarding email to a newly added employee with password setup link"""
         try:
             # Create reset link using backend-served page
             setup_link = f"{self.backend_url}/auth/reset-password?token={reset_token}"
@@ -136,7 +136,7 @@ class EmailService:
                     <p style="font-size: 16px; margin-bottom: 20px;">Hello {user_name},</p>
                     
                     <p style="font-size: 16px; margin-bottom: 20px;">
-                        You've been added as an artist at {shop_name}. 
+                        You've been added as an employee at {business_name}. 
                         To get started, you need to set up your password.
                     </p>
                     
@@ -184,7 +184,7 @@ class EmailService:
             
             Hello {user_name},
             
-            You've been added as an artist at {shop_name}. To get started, you need to set up your password.
+            You've been added as an employee at {business_name}. To get started, you need to set up your password.
             
             Please visit this link to set up your password and access your account:
             {setup_link}
@@ -198,7 +198,7 @@ class EmailService:
             return self._send_email(to_email, subject, html_body, text_body)
             
         except Exception as e:
-            logger.error(f"Error sending artist onboarding email: {str(e)}")
+            logger.error(f"Error sending employee onboarding email: {str(e)}")
             return False
     
     def _send_email(self, to_email: str, subject: str, html_body: str, text_body: str) -> bool:

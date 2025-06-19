@@ -1,17 +1,17 @@
 from sqlalchemy.orm import Session
-from app.models import Shop, QueueEntry, QueueStatus, Appointment, AppointmentStatus, Service
+from app.models import Business, QueueEntry, QueueStatus, Appointment, AppointmentStatus, Service
 from app.schemas import convert_to_pacific
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-def get_queue_display_data(db: Session, shop_id: int) -> Dict[str, Any]:
+def get_queue_display_data(db: Session, business_id: int) -> Dict[str, Any]:
     """
-    Get the display queue data for a specific shop.
+    Get the display queue data for a specific business.
     This is reused by both the HTTP endpoint and WebSocket.
     """
-    # Validate shop exists
-    shop = db.query(Shop).filter(Shop.id == shop_id).first()
-    if not shop:
+    # Validate business exists
+    business = db.query(Business).filter(Business.id == business_id).first()
+    if not business:
         return None
     
     current_time = datetime.utcnow()
@@ -22,20 +22,20 @@ def get_queue_display_data(db: Session, shop_id: int) -> Dict[str, Any]:
     
     # Get active walk-ins in queue
     walk_ins = db.query(QueueEntry).filter(
-        QueueEntry.shop_id == shop_id,
+        QueueEntry.business_id == business_id,
         QueueEntry.status.in_([QueueStatus.CHECKED_IN, QueueStatus.ARRIVED])
     ).order_by(QueueEntry.position_in_queue.asc()).all()
     
     # Get upcoming appointments (for today only)
     appointments = db.query(Appointment).filter(
-        Appointment.shop_id == shop_id,
+        Appointment.business_id == business_id,
         Appointment.status == AppointmentStatus.SCHEDULED,
         Appointment.appointment_time >= current_time,
         Appointment.appointment_time < today_end
     ).order_by(Appointment.appointment_time.asc()).all()
     
-    # Calculate default service duration from shop
-    default_duration = shop.average_wait_time or 20  # fallback to 20 minutes
+    # Calculate default service duration from business
+    default_duration = business.average_wait_time or 20  # fallback to 20 minutes
     
     # Process walk-ins first
     display_queue = []
@@ -121,8 +121,8 @@ def get_queue_display_data(db: Session, shop_id: int) -> Dict[str, Any]:
     
     # Build the simplified response
     response = {
-        "shop_id": shop_id,
-        "shop_name": shop.name,
+        "business_id": business_id,
+        "business_name": business.name,
         "current_time": display_current_time.strftime("%I:%M %p"),
         "queue": display_queue,
         "updated_at": current_time.isoformat()  # Add timestamp for clients to track updates
@@ -130,12 +130,12 @@ def get_queue_display_data(db: Session, shop_id: int) -> Dict[str, Any]:
     
     return response
 
-async def broadcast_queue_update(db: Session, shop_id: int, manager):
-    """Broadcast queue update to all connected clients for a shop."""
+async def broadcast_queue_update(db: Session, business_id: int, manager):
+    """Broadcast queue update to all connected clients for a business."""
     from app.websockets.manager import manager
     
-    shop_id_str = str(shop_id)
-    if manager.get_shop_connection_count(shop_id_str) > 0:
-        queue_data = get_queue_display_data(db, shop_id)
+    business_id_str = str(business_id)
+    if manager.get_shop_connection_count(business_id_str) > 0:
+        queue_data = get_queue_display_data(db, business_id)
         if queue_data:
-            await manager.broadcast_to_shop(shop_id_str, queue_data) 
+            await manager.broadcast_to_shop(business_id_str, queue_data) 

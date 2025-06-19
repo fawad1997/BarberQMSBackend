@@ -17,14 +17,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from app.database import Base
 from app.models import (
     User,
-    Shop,
-    Barber,
+    Business,
+    Employee,
     Service,
     Appointment,
     Feedback,
     QueueEntry,
-    BarberSchedule,
-    barber_services
+    EmployeeSchedule,
+    BusinessOperatingHours,
+    ScheduleOverride,
+    BusinessAdvertisement,
+    ContactMessage,
+    employee_services
 )
 
 # this is the Alembic Config object

@@ -357,3 +357,4 @@ def get_barber_metrics(
         "avg_service_duration_minutes": avg_service_duration_minutes,
         "daily_data": daily_data
     }
+

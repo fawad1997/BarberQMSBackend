@@ -4,14 +4,15 @@ from fastapi.staticfiles import StaticFiles
 from app.routers import (
     auth,
     users,
-    shop_owners,
-    barbers,
+    business_owners,
+    employees,
     admin,
     appointments,
     queue,
     feedback,
     unregistered_users,
-    sso_routes
+    sso_routes,
+    public
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
@@ -101,13 +102,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
 app.include_router(sso_routes.router)
 app.include_router(users.router)
-app.include_router(shop_owners.router)
-app.include_router(barbers.router)
+app.include_router(business_owners.router)
+app.include_router(employees.router)
 app.include_router(admin.router)
 app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
+app.include_router(public.router)
 app.include_router(websocket_router)  # Include WebSocket router
 
 

@@ -46,8 +46,8 @@ class QueueStatus(enum.Enum):
     CANCELLED = "CANCELLED"
 
 
-# Enum for barber status
-class BarberStatus(enum.Enum):
+# Enum for employee status (formerly BarberStatus)
+class EmployeeStatus(enum.Enum):
     AVAILABLE = "available"
     IN_SERVICE = "in_service"
     ON_BREAK = "on_break"
@@ -61,11 +61,20 @@ class ScheduleType(enum.Enum):
     OFF = "off"
 
 
-# Association table for many-to-many relationship between Barbers and Services
-barber_services = Table(
-    "barber_services",
+# Enum for override types
+class OverrideType(enum.Enum):
+    HOLIDAY = "holiday"
+    SPECIAL_EVENT = "special_event"
+    EMERGENCY = "emergency"
+    PERSONAL = "personal"
+    SICK_LEAVE = "sick_leave"
+
+
+# Association table for many-to-many relationship between Employees and Services
+employee_services = Table(
+    "employee_services",
     Base.metadata,
-    Column("barber_id", Integer, ForeignKey("barbers.id"), primary_key=True),
+    Column("employee_id", Integer, ForeignKey("employees.id"), primary_key=True),
     Column("service_id", Integer, ForeignKey("services.id"), primary_key=True),
 )
 
@@ -88,9 +97,9 @@ class User(Base):
     reset_token_expires = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    shops = relationship("Shop", back_populates="owner", cascade="all, delete")
-    barber_profile = relationship(
-        "Barber", uselist=False, back_populates="user", cascade="all, delete"
+    businesses = relationship("Business", back_populates="owner", cascade="all, delete")
+    employee_profile = relationship(
+        "Employee", uselist=False, back_populates="user", cascade="all, delete"
     )
     feedbacks = relationship("Feedback", back_populates="user", cascade="all, delete")
     appointments = relationship(
@@ -101,13 +110,13 @@ class User(Base):
     )
 
 
-class Shop(Base):
-    __tablename__ = "shops"
+class Business(Base):
+    __tablename__ = "businesses"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
-    username = Column(String, unique=True, nullable=True, index=True)  # New username field
+    username = Column(String, unique=True, nullable=True, index=True)
     address = Column(String, nullable=False)
     city = Column(String, nullable=False)
     state = Column(String, nullable=False)
@@ -115,84 +124,83 @@ class Shop(Base):
     phone_number = Column(String, nullable=True)
     email = Column(String, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    opening_time = Column(Time, nullable=False)
-    closing_time = Column(Time, nullable=False)
     average_wait_time = Column(Float, default=0.0)
-    has_advertisement = Column(Boolean, default=False)
-    advertisement_image_url = Column(String, nullable=True)
-    advertisement_start_date = Column(DateTime, nullable=True)
-    advertisement_end_date = Column(DateTime, nullable=True)
-    is_advertisement_active = Column(Boolean, default=False)
     is_open_24_hours = Column(Boolean, default=False)
-    timezone = Column(String, nullable=False, default="America/Los_Angeles")
+    
+    # New fields
+    description = Column(Text, nullable=True)
+    logo_url = Column(String, nullable=True)
 
     # Relationships
-    owner = relationship("User", back_populates="shops")
-    barbers = relationship(
-        "Barber", back_populates="shop", cascade="all, delete-orphan"
+    owner = relationship("User", back_populates="businesses")
+    employees = relationship(
+        "Employee", back_populates="business", cascade="all, delete-orphan"
     )
     services = relationship(
-        "Service", back_populates="shop", cascade="all, delete-orphan"
+        "Service", back_populates="business", cascade="all, delete-orphan"
     )
     queue_entries = relationship(
-        "QueueEntry", back_populates="shop", cascade="all, delete-orphan"
+        "QueueEntry", back_populates="business", cascade="all, delete-orphan"
     )
     appointments = relationship(
-        "Appointment", back_populates="shop", cascade="all, delete-orphan"
+        "Appointment", back_populates="business", cascade="all, delete-orphan"
     )
     feedbacks = relationship(
-        "Feedback", back_populates="shop", cascade="all, delete-orphan"
+        "Feedback", back_populates="business", cascade="all, delete-orphan"
     )
     operating_hours = relationship(
-        "ShopOperatingHours", back_populates="shop", cascade="all, delete-orphan"
+        "BusinessOperatingHours", back_populates="business", cascade="all, delete-orphan"
     )
-    work_schedules = relationship("WorkSchedule", back_populates="shop", cascade="all, delete-orphan")
-    schedule_overrides = relationship("ScheduleOverride", back_populates="shop", cascade="all, delete-orphan")
+    schedule_overrides = relationship("ScheduleOverride", back_populates="business", cascade="all, delete-orphan")
+    advertisements = relationship("BusinessAdvertisement", back_populates="business", cascade="all, delete-orphan")
 
 
-class ShopOperatingHours(Base):
-    __tablename__ = "shop_operating_hours"
+class BusinessOperatingHours(Base):
+    __tablename__ = "business_operating_hours"
     
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
     day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
     opening_time = Column(Time, nullable=True)  # Null if closed that day
     closing_time = Column(Time, nullable=True)  # Null if closed that day
     is_closed = Column(Boolean, default=False)
     
+    # New lunch break fields
+    lunch_break_start = Column(Time, nullable=True)
+    lunch_break_end = Column(Time, nullable=True)
+    
     # Relationship
-    shop = relationship("Shop", back_populates="operating_hours")
+    business = relationship("Business", back_populates="operating_hours")
     
     __table_args__ = (
-        UniqueConstraint('shop_id', 'day_of_week', name='uix_shop_day'),
+        UniqueConstraint('business_id', 'day_of_week', name='uix_business_day'),
     )
 
 
-class Barber(Base):
-    __tablename__ = "barbers"
+class Employee(Base):
+    __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
-    status = Column(Enum(BarberStatus), default=BarberStatus.AVAILABLE)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    status = Column(Enum(EmployeeStatus), default=EmployeeStatus.AVAILABLE)
 
     # Relationships
-    user = relationship("User", back_populates="barber_profile")
-    shop = relationship("Shop", back_populates="barbers")
+    user = relationship("User", back_populates="employee_profile")
+    business = relationship("Business", back_populates="employees")
     services = relationship(
-        "Service", secondary=barber_services, back_populates="barbers"
+        "Service", secondary=employee_services, back_populates="employees"
     )
     appointments = relationship(
-        "Appointment", back_populates="barber", cascade="all, delete-orphan"
+        "Appointment", back_populates="employee", cascade="all, delete-orphan"
     )
     feedbacks = relationship(
-        "Feedback", back_populates="barber", cascade="all, delete-orphan"
+        "Feedback", back_populates="employee", cascade="all, delete-orphan"
     )
     schedules = relationship(
-        "BarberSchedule", back_populates="barber", cascade="all, delete-orphan"
+        "EmployeeSchedule", back_populates="employee", cascade="all, delete-orphan"
     )
-    work_schedules = relationship("WorkSchedule", secondary="employee_schedules", back_populates="employees")
-    schedule_overrides = relationship("ScheduleOverride", back_populates="barber", cascade="all, delete-orphan")
+    schedule_overrides = relationship("ScheduleOverride", back_populates="employee", cascade="all, delete-orphan")
 
 
 class Service(Base):
@@ -202,12 +210,16 @@ class Service(Base):
     name = Column(String, nullable=False)
     duration = Column(Integer, nullable=False)  # Duration in minutes
     price = Column(Float, nullable=False)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    
+    # New fields
+    is_active = Column(Boolean, default=True)
+    category = Column(String, nullable=True)
 
     # Relationships
-    shop = relationship("Shop", back_populates="services")
-    barbers = relationship(
-        "Barber", secondary=barber_services, back_populates="services"
+    business = relationship("Business", back_populates="services")
+    employees = relationship(
+        "Employee", secondary=employee_services, back_populates="services"
     )
     appointments = relationship(
         "Appointment", back_populates="service", cascade="all, delete-orphan"
@@ -222,8 +234,8 @@ class Appointment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     appointment_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
@@ -236,11 +248,16 @@ class Appointment(Base):
     number_of_people = Column(Integer, default=1)
     custom_duration = Column(Integer, nullable=True)  # In minutes, overrides service duration
     custom_price = Column(Float, nullable=True)  # Overrides default service price
+    
+    # New fields
+    total_duration = Column(Integer, nullable=True)  # Calculated from services
+    total_price = Column(Float, nullable=True)  # Calculated from services
+    notes = Column(Text, nullable=True)  # Special instructions
 
     # Relationships
     user = relationship("User", back_populates="appointments")
-    shop = relationship("Shop", back_populates="appointments")
-    barber = relationship("Barber", back_populates="appointments")
+    business = relationship("Business", back_populates="appointments")
+    employee = relationship("Employee", back_populates="appointments")
     service = relationship("Service", back_populates="appointments")
 
     def __init__(self, **kwargs):
@@ -267,27 +284,28 @@ class Feedback(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     rating = Column(Integer, nullable=False)  # Rating between 1 and 5
-    comments = Column(Text, nullable=True)
+    message = Column(Text, nullable=True)  # Renamed from comments
+    subject = Column(String, nullable=True)  # New field
     category = Column(String, nullable=True)  # Service, wait time, cleanliness, etc.
     created_at = Column(DateTime, default=func.now())
 
     # Relationships
     user = relationship("User", back_populates="feedbacks")
-    shop = relationship("Shop", back_populates="feedbacks")
-    barber = relationship("Barber", back_populates="feedbacks")
+    business = relationship("Business", back_populates="feedbacks")
+    employee = relationship("Employee", back_populates="feedbacks")
 
 
 class QueueEntry(Base):
     __tablename__ = "queue_entries"
 
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
     service_id = Column(Integer, ForeignKey("services.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     full_name = Column(String, nullable=False)
     phone_number = Column(String, nullable=False)
     number_of_people = Column(Integer, default=1)
@@ -299,12 +317,16 @@ class QueueEntry(Base):
     service_end_time = Column(DateTime, nullable=True)
     custom_duration = Column(Integer, nullable=True)  # In minutes, overrides service duration
     custom_price = Column(Float, nullable=True)  # Overrides default service price
+    
+    # New fields
+    estimated_service_time = Column(DateTime, nullable=True)  # When service is expected to start
+    notes = Column(Text, nullable=True)  # Special instructions
 
     # Relationships
-    shop = relationship("Shop", back_populates="queue_entries")
+    business = relationship("Business", back_populates="queue_entries")
     service = relationship("Service", back_populates="queue_entries")
     user = relationship("User", back_populates="queue_entries")
-    barber = relationship("Barber")
+    employee = relationship("Employee")
 
 
 class ScheduleRepeatFrequency(enum.Enum):
@@ -326,72 +348,38 @@ class ScheduleRepeatFrequency(enum.Enum):
         return cls.NONE
 
 
-class BarberSchedule(Base):
-    __tablename__ = "barber_schedules"
+class EmployeeSchedule(Base):
+    __tablename__ = "employee_schedules"
 
     id = Column(Integer, primary_key=True, index=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id", ondelete="CASCADE"), nullable=False)
-    start_date = Column(DateTime(timezone=True), nullable=False)
-    end_date = Column(DateTime(timezone=True), nullable=False)
-    repeat_frequency = Column(
-        Enum(ScheduleRepeatFrequency, name="schedulerepeatfrequency", create_constraint=False),
-        nullable=False,
-        server_default="NONE"
-    )
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0-6 for Sunday-Saturday
+    start_time = Column(Time, nullable=True)  # Daily start time
+    end_time = Column(Time, nullable=True)  # Daily end time
+    lunch_break_start = Column(Time, nullable=True)  # Personal lunch break
+    lunch_break_end = Column(Time, nullable=True)  # Personal lunch break
+    is_working = Column(Boolean, default=True)  # Whether working that day
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    barber = relationship("Barber", back_populates="schedules")
+    employee = relationship("Employee", back_populates="schedules")
 
     @property
-    def shop_id(self):
-        return self.barber.shop_id
+    def business_id(self):
+        return self.employee.business_id
 
-
-class WorkSchedule(Base):
-    __tablename__ = "work_schedules"
-
-    id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
-    name = Column(String, nullable=True)
-    day_of_week = Column(ARRAY(Integer), nullable=True)
-    start_time = Column(Time, nullable=True)
-    end_time = Column(Time, nullable=True)
-    effective_start_date = Column(Date, nullable=True)
-    effective_end_date = Column(Date, nullable=True)
-
-    # Relationships
-    shop = relationship("Shop", back_populates="work_schedules")
-    breaks = relationship("ScheduleBreak", back_populates="work_schedule", cascade="all, delete-orphan")
-    employees = relationship("Barber", secondary="employee_schedules", back_populates="work_schedules")
-
-
-class ScheduleBreak(Base):
-    __tablename__ = "schedule_breaks"
-
-    id = Column(Integer, primary_key=True, index=True)
-    work_schedule_id = Column(Integer, ForeignKey("work_schedules.id"), nullable=False)
-    break_start = Column(Time, nullable=True)
-    break_end = Column(Time, nullable=True)
-
-    # Relationships
-    work_schedule = relationship("WorkSchedule", back_populates="breaks")
-
-
-class EmployeeSchedule(Base):
-    __tablename__ = "employee_schedules"
-
-    employee_id = Column(Integer, ForeignKey("barbers.id"), primary_key=True)
-    work_schedule_id = Column(Integer, ForeignKey("work_schedules.id"), primary_key=True)
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'day_of_week', name='uix_employee_day'),
+    )
 
 
 class ScheduleOverride(Base):
     __tablename__ = "schedule_overrides"
 
     id = Column(Integer, primary_key=True, index=True)
-    barber_id = Column(Integer, ForeignKey("barbers.id"), nullable=True)
-    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
     start_date = Column(DateTime(timezone=True), nullable=True)
     end_date = Column(DateTime(timezone=True), nullable=True)
     repeat_frequency = Column(
@@ -399,7 +387,37 @@ class ScheduleOverride(Base):
         nullable=False,
         server_default="NONE"
     )
+    
+    # New fields
+    reason = Column(String, nullable=True)  # Why the override exists
+    override_type = Column(Enum(OverrideType), nullable=True)  # Type of override
 
     # Relationships
-    barber = relationship("Barber", back_populates="schedule_overrides")
-    shop = relationship("Shop", back_populates="schedule_overrides")
+    employee = relationship("Employee", back_populates="schedule_overrides")
+    business = relationship("Business", back_populates="schedule_overrides")
+
+
+class BusinessAdvertisement(Base):
+    __tablename__ = "business_advertisements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    image_url = Column(String, nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+
+    # Relationship
+    business = relationship("Business", back_populates="advertisements")
+
+
+class ContactMessage(Base):
+    __tablename__ = "contact_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    email = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())

@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
-from typing import List, Tuple
-from app.models import BarberSchedule, ScheduleRepeatFrequency, ScheduleOverride
+from datetime import datetime, timedelta, time
+from typing import List, Tuple, Optional
+from app.models import EmployeeSchedule, ScheduleRepeatFrequency, ScheduleOverride
 import pytz
 
 UTC = pytz.UTC
@@ -12,147 +12,131 @@ def ensure_timezone_aware(dt: datetime, timezone_str: str = 'America/Los_Angeles
         return timezone.localize(dt)
     return dt
 
-def get_recurring_instances(
-    schedule: BarberSchedule,
-    start_date: datetime,
-    end_date: datetime,
-    timezone_str: str = 'America/Los_Angeles'
-) -> List[dict]:
-    """
-    Generate recurring schedule instances based on the schedule's repeat frequency.
-    Returns a list of dictionaries containing start and end times for each instance.
-    """
-    instances = []
-    
-    # Ensure all datetimes are timezone-aware
-    schedule_start = ensure_timezone_aware(schedule.start_date, timezone_str)
-    schedule_end = ensure_timezone_aware(schedule.end_date, timezone_str)
-    start_date = ensure_timezone_aware(start_date, timezone_str)
-    end_date = ensure_timezone_aware(end_date, timezone_str)
-    
-    # If no recurrence or dates are invalid, return just the original instance if it falls in range
-    if (schedule.repeat_frequency == ScheduleRepeatFrequency.NONE or
-        start_date >= end_date or
-        schedule_start >= schedule_end):
-        if (schedule_start <= end_date and schedule_end >= start_date):
-            instances.append({
-                "start_datetime": schedule_start,
-                "end_datetime": schedule_end
-            })
-        return instances
-
-    # Calculate duration of the schedule
-    duration = schedule_end - schedule_start
-    
-    # Calculate the interval based on repeat frequency
-    if schedule.repeat_frequency == ScheduleRepeatFrequency.DAILY:
-        interval = timedelta(days=1)
-        current = schedule_start
-        while current <= end_date:
-            if current >= start_date:
-                instance_end = current + duration
-                instances.append({
-                    "start_datetime": current,
-                    "end_datetime": instance_end
-                })
-            current += interval
-            
-    elif schedule.repeat_frequency == ScheduleRepeatFrequency.WEEKLY:
-        interval = timedelta(weeks=1)
-        current = schedule_start
-        while current <= end_date:
-            if current >= start_date:
-                instance_end = current + duration
-                instances.append({
-                    "start_datetime": current,
-                    "end_datetime": instance_end
-                })
-            current += interval
-            
-    elif schedule.repeat_frequency == ScheduleRepeatFrequency.WEEKLY_NO_WEEKENDS:
-        current = schedule_start
-        while current <= end_date:
-            # Skip weekends (5 = Saturday, 6 = Sunday)
-            if current.weekday() < 5:  # Only process weekdays (0-4)
-                if current >= start_date:
-                    instance_end = current + duration
-                    instances.append({
-                        "start_datetime": current,
-                        "end_datetime": instance_end
-                    })
-            current += timedelta(days=1)
-
-    return instances
-
-def check_schedule_conflicts(
+def get_employee_schedule_for_day(
     db,
-    barber_id: int,
-    start_date: datetime,
-    end_date: datetime,
-    timezone_str: str,
-    exclude_schedule_id: int = None
+    employee_id: int,
+    target_date: datetime
+) -> Optional[EmployeeSchedule]:
+    """
+    Get an employee's schedule for a specific day of the week.
+    """
+    day_of_week = (target_date.weekday() + 1) % 7  # Convert to our format (Sunday = 0)
+    
+    schedule = db.query(EmployeeSchedule).filter(
+        EmployeeSchedule.employee_id == employee_id,
+        EmployeeSchedule.day_of_week == day_of_week,
+        EmployeeSchedule.is_working == True
+    ).first()
+    
+    return schedule
+
+def is_employee_working(
+    db,
+    employee_id: int,
+    target_datetime: datetime
 ) -> bool:
     """
-    Check for schedule conflicts considering recurring schedules.
-    Returns True if there is a conflict, False otherwise.
+    Check if an employee is scheduled to work at a specific datetime.
     """
-    # Ensure input datetimes are timezone-aware
-    start_date = ensure_timezone_aware(start_date, timezone_str)
-    end_date = ensure_timezone_aware(end_date, timezone_str)
+    schedule = get_employee_schedule_for_day(db, employee_id, target_datetime)
     
-    # Get all schedules for the barber
-    query = db.query(BarberSchedule).filter(BarberSchedule.barber_id == barber_id)
-    if exclude_schedule_id:
-        query = query.filter(BarberSchedule.id != exclude_schedule_id)
-    schedules = query.all()
+    if not schedule:
+        return False
     
-    # Check each schedule for conflicts
-    for schedule in schedules:
-        instances = get_recurring_instances(schedule, start_date, end_date, timezone_str)
-        for instance in instances:
-            if (instance["start_datetime"] <= end_date and 
-                instance["end_datetime"] >= start_date):
-                return True
+    target_time = target_datetime.time()
+    
+    # Check if within working hours
+    if schedule.start_time and schedule.end_time:
+        if schedule.end_time < schedule.start_time:  # Overnight shift
+            return target_time >= schedule.start_time or target_time <= schedule.end_time
+        else:
+            return schedule.start_time <= target_time <= schedule.end_time
     
     return False
 
-def generate_schedule_dates(
-    start_date: datetime,
-    end_date: datetime,
-    repeat_frequency: ScheduleRepeatFrequency
-) -> List[Tuple[datetime, datetime]]:
+def is_employee_on_lunch_break(
+    db,
+    employee_id: int,
+    target_datetime: datetime
+) -> bool:
     """
-    Generate schedule dates based on repeat frequency.
-    Returns a list of (start_date, end_date) tuples.
+    Check if an employee is on lunch break at a specific datetime.
     """
-    if repeat_frequency == ScheduleRepeatFrequency.NONE:
-        return [(start_date, end_date)]
+    schedule = get_employee_schedule_for_day(db, employee_id, target_datetime)
+    
+    if not schedule or not schedule.lunch_break_start or not schedule.lunch_break_end:
+        return False
+    
+    target_time = target_datetime.time()
+    
+    if schedule.lunch_break_end < schedule.lunch_break_start:  # Overnight lunch break
+        return target_time >= schedule.lunch_break_start or target_time <= schedule.lunch_break_end
+    else:
+        return schedule.lunch_break_start <= target_time <= schedule.lunch_break_end
 
-    schedules = []
-    current_date = start_date
-    duration = end_date - start_date
+def get_employee_working_hours(
+    db,
+    employee_id: int,
+    target_date: datetime
+) -> Tuple[Optional[time], Optional[time]]:
+    """
+    Get an employee's working hours for a specific day.
+    Returns (start_time, end_time) or (None, None) if not working.
+    """
+    schedule = get_employee_schedule_for_day(db, employee_id, target_date)
+    
+    if not schedule or not schedule.is_working:
+        return None, None
+    
+    return schedule.start_time, schedule.end_time
 
-    if repeat_frequency == ScheduleRepeatFrequency.DAILY:
-        while current_date <= end_date:
-            schedule_end = current_date + duration
-            schedules.append((current_date, schedule_end))
-            current_date = current_date + timedelta(days=1)
-
-    elif repeat_frequency == ScheduleRepeatFrequency.WEEKLY:
-        while current_date <= end_date:
-            schedule_end = current_date + duration
-            schedules.append((current_date, schedule_end))
-            current_date = current_date + timedelta(days=7)
-
-    elif repeat_frequency == ScheduleRepeatFrequency.WEEKLY_NO_WEEKENDS:
-        while current_date <= end_date:
-            # Skip weekends (5 = Saturday, 6 = Sunday)
-            if current_date.weekday() < 5:  # Only process weekdays (0-4)
-                schedule_end = current_date + duration
-                schedules.append((current_date, schedule_end))
-            current_date = current_date + timedelta(days=1)
-
-    return schedules
+def check_schedule_conflicts(
+    db,
+    employee_id: int,
+    day_of_week: int,
+    start_time: time,
+    end_time: time,
+    exclude_schedule_id: Optional[int] = None
+) -> bool:
+    """
+    Check for schedule conflicts for an employee on a specific day.
+    Returns True if there is a conflict, False otherwise.
+    """
+    query = db.query(EmployeeSchedule).filter(
+        EmployeeSchedule.employee_id == employee_id,
+        EmployeeSchedule.day_of_week == day_of_week,
+        EmployeeSchedule.is_working == True
+    )
+    
+    if exclude_schedule_id:
+        query = query.filter(EmployeeSchedule.id != exclude_schedule_id)
+    
+    existing_schedule = query.first()
+    
+    if not existing_schedule:
+        return False
+    
+    # Check for time overlap
+    existing_start = existing_schedule.start_time
+    existing_end = existing_schedule.end_time
+    
+    if not existing_start or not existing_end:
+        return False
+    
+    # Handle overnight schedules
+    if end_time < start_time:  # New schedule is overnight
+        if existing_end < existing_start:  # Existing is also overnight
+            return True  # Two overnight schedules conflict
+        else:
+            # Check if new overnight schedule conflicts with existing day schedule
+            return (start_time <= existing_end) or (end_time >= existing_start)
+    else:  # New schedule is within a day
+        if existing_end < existing_start:  # Existing is overnight
+            # Check if existing overnight schedule conflicts with new day schedule
+            return (existing_start <= end_time) or (existing_end >= start_time)
+        else:
+            # Both schedules are within a day
+            return not (end_time <= existing_start or start_time >= existing_end)
 
 def get_recurring_override_instances(
     override: ScheduleOverride,
@@ -166,10 +150,13 @@ def get_recurring_override_instances(
     instances = []
     
     # Ensure all datetimes are timezone-aware
-    override_start = ensure_timezone_aware(override.start_date)
-    override_end = ensure_timezone_aware(override.end_date)
+    override_start = ensure_timezone_aware(override.start_date) if override.start_date else None
+    override_end = ensure_timezone_aware(override.end_date) if override.end_date else None
     start_date = ensure_timezone_aware(start_date)
     end_date = ensure_timezone_aware(end_date)
+    
+    if not override_start or not override_end:
+        return instances
     
     # If no recurrence or dates are invalid, return just the original instance if it falls in range
     if (override.repeat_frequency == ScheduleRepeatFrequency.NONE or
@@ -209,7 +196,7 @@ def get_recurring_override_instances(
                     "end_datetime": instance_end
                 })
             current += interval
-            
+                
     elif override.repeat_frequency == ScheduleRepeatFrequency.MONTHLY:
         current = override_start
         while current <= end_date:
@@ -241,10 +228,10 @@ def get_recurring_override_instances(
 
 def check_override_conflicts(
     db,
-    barber_id: int,
+    employee_id: int,
     start_date: datetime,
     end_date: datetime,
-    exclude_override_id: int = None
+    exclude_override_id: Optional[int] = None
 ) -> bool:
     """
     Check for schedule override conflicts considering recurring overrides.
@@ -254,8 +241,8 @@ def check_override_conflicts(
     start_date = ensure_timezone_aware(start_date)
     end_date = ensure_timezone_aware(end_date)
     
-    # Get all overrides for the barber
-    query = db.query(ScheduleOverride).filter(ScheduleOverride.barber_id == barber_id)
+    # Get all overrides for the employee
+    query = db.query(ScheduleOverride).filter(ScheduleOverride.employee_id == employee_id)
     if exclude_override_id:
         query = query.filter(ScheduleOverride.id != exclude_override_id)
     overrides = query.all()

@@ -12,28 +12,13 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 get_current_admin = get_current_user_by_role(UserRole.ADMIN)
 
-@router.get("/shops/", response_model=List[schemas.ShopResponse])
-def get_all_shops(
+@router.get("/businesses/", response_model=List[schemas.BusinessResponse])
+def get_all_businesses(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_admin)
 ):
-    shops = db.query(models.Shop).all()
-    return shops
-
-@router.put("/shops/{shop_id}/approve", response_model=schemas.ShopResponse)
-def approve_shop(
-    shop_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_admin)
-):
-    shop = db.query(models.Shop).filter(models.Shop.id == shop_id).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    shop.is_approved = True
-    db.add(shop)
-    db.commit()
-    db.refresh(shop)
-    return shop
+    businesses = db.query(models.Business).all()
+    return businesses
 
 @router.get("/users/", response_model=List[schemas.UserResponse])
 def get_all_users(
@@ -57,3 +42,17 @@ def deactivate_user(
     db.commit()
     db.refresh(user)
     return user
+
+@router.delete("/businesses/{business_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_business(
+    business_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_admin)
+):
+    business = db.query(models.Business).filter(models.Business.id == business_id).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    db.delete(business)
+    db.commit()
+    return

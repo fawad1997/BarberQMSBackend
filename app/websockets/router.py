@@ -11,18 +11,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.websocket("/ws/queue/{shop_id}")
-async def queue_websocket(websocket: WebSocket, shop_id: str, db: Session = Depends(get_db)):
-    """WebSocket endpoint for receiving real-time queue updates for a specific shop."""
+@router.websocket("/ws/queue/{business_id}")
+async def queue_websocket(websocket: WebSocket, business_id: str, db: Session = Depends(get_db)):
+    """WebSocket endpoint for receiving real-time queue updates for a specific business."""
     try:
-        # Get the queue display data for the shop
-        queue_data = get_queue_display_data(db, int(shop_id))
+        # Get the queue display data for the business
+        queue_data = get_queue_display_data(db, int(business_id))
         if not queue_data:
-            await websocket.close(code=4004, reason="Shop not found")
+            await websocket.close(code=4004, reason="Business not found")
             return
             
         # Accept the connection
-        await manager.connect(websocket, shop_id)
+        await manager.connect(websocket, business_id)
         
         # Send initial queue data
         await websocket.send_json(queue_data)
@@ -34,10 +34,10 @@ async def queue_websocket(websocket: WebSocket, shop_id: str, db: Session = Depe
                 # We're not processing any incoming messages, just keeping the connection alive
                 await asyncio.sleep(0.1)
         except WebSocketDisconnect:
-            manager.disconnect(websocket, shop_id)
+            manager.disconnect(websocket, business_id)
         
     except Exception as e:
-        logger.error(f"WebSocket error for shop {shop_id}: {str(e)}")
+        logger.error(f"WebSocket error for business {business_id}: {str(e)}")
         try:
             await websocket.close(code=1011, reason="Server error")
         except:
