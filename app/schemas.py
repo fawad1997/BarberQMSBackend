@@ -12,6 +12,23 @@ import re
 TIMEZONE = pytz.timezone('America/Los_Angeles')
 UTC = pytz.UTC
 
+# US Timezones mapping
+US_TIMEZONES = {
+    "America/New_York": "Eastern Time (GMT-5/-4)",
+    "America/Chicago": "Central Time (GMT-6/-5)", 
+    "America/Denver": "Mountain Time (GMT-7/-6)",
+    "America/Phoenix": "Mountain Standard Time (GMT-7)",
+    "America/Los_Angeles": "Pacific Time (GMT-8/-7)",
+    "America/Anchorage": "Alaska Time (GMT-9/-8)",
+    "Pacific/Honolulu": "Hawaii Time (GMT-10)"
+}
+
+def validate_us_timezone(timezone_str: str) -> str:
+    """Validate that the timezone is a supported US timezone."""
+    if timezone_str not in US_TIMEZONES:
+        raise ValueError(f"Timezone must be one of: {', '.join(US_TIMEZONES.keys())}")
+    return timezone_str
+
 # Add these timezone helper functions
 def convert_to_pacific(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -261,6 +278,7 @@ class ShopBase(BaseModel):
     formatted_hours: Optional[str] = None
     slug: str
     username: str  # Username is now required
+    timezone: str = "America/Los_Angeles"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -278,10 +296,15 @@ class ShopCreate(BaseModel):
     operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
     slug: Optional[str] = None
     username: str  # Username is now required
+    timezone: str = "America/Los_Angeles"
 
     @field_validator('username')
     def validate_username_field(cls, v):
         return validate_username(v)
+    
+    @field_validator('timezone')
+    def validate_timezone_field(cls, v):
+        return validate_us_timezone(v)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -303,11 +326,18 @@ class ShopUpdate(BaseModel):
     is_advertisement_active: Optional[bool] = None
     slug: Optional[str] = None
     username: Optional[str] = None
+    timezone: Optional[str] = None
 
     @field_validator('username')
     def validate_username_field(cls, v):
         if v is not None:
             return validate_username(v)
+        return v
+    
+    @field_validator('timezone')
+    def validate_timezone_field(cls, v):
+        if v is not None:
+            return validate_us_timezone(v)
         return v
 
     # Add validator for dates

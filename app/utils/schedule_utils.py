@@ -3,19 +3,20 @@ from typing import List, Tuple
 from app.models import BarberSchedule, ScheduleRepeatFrequency, ScheduleOverride
 import pytz
 
-TIMEZONE = pytz.timezone('America/Los_Angeles')
 UTC = pytz.UTC
 
-def ensure_timezone_aware(dt: datetime) -> datetime:
-    """Ensure datetime is timezone-aware, assuming naive datetimes are in Pacific time."""
+def ensure_timezone_aware(dt: datetime, timezone_str: str = 'America/Los_Angeles') -> datetime:
+    """Ensure datetime is timezone-aware, using the specified timezone for naive datetimes."""
     if dt.tzinfo is None:
-        return TIMEZONE.localize(dt)
+        timezone = pytz.timezone(timezone_str)
+        return timezone.localize(dt)
     return dt
 
 def get_recurring_instances(
     schedule: BarberSchedule,
     start_date: datetime,
-    end_date: datetime
+    end_date: datetime,
+    timezone_str: str = 'America/Los_Angeles'
 ) -> List[dict]:
     """
     Generate recurring schedule instances based on the schedule's repeat frequency.
@@ -24,10 +25,10 @@ def get_recurring_instances(
     instances = []
     
     # Ensure all datetimes are timezone-aware
-    schedule_start = ensure_timezone_aware(schedule.start_date)
-    schedule_end = ensure_timezone_aware(schedule.end_date)
-    start_date = ensure_timezone_aware(start_date)
-    end_date = ensure_timezone_aware(end_date)
+    schedule_start = ensure_timezone_aware(schedule.start_date, timezone_str)
+    schedule_end = ensure_timezone_aware(schedule.end_date, timezone_str)
+    start_date = ensure_timezone_aware(start_date, timezone_str)
+    end_date = ensure_timezone_aware(end_date, timezone_str)
     
     # If no recurrence or dates are invalid, return just the original instance if it falls in range
     if (schedule.repeat_frequency == ScheduleRepeatFrequency.NONE or
@@ -88,6 +89,7 @@ def check_schedule_conflicts(
     barber_id: int,
     start_date: datetime,
     end_date: datetime,
+    timezone_str: str,
     exclude_schedule_id: int = None
 ) -> bool:
     """
@@ -95,8 +97,8 @@ def check_schedule_conflicts(
     Returns True if there is a conflict, False otherwise.
     """
     # Ensure input datetimes are timezone-aware
-    start_date = ensure_timezone_aware(start_date)
-    end_date = ensure_timezone_aware(end_date)
+    start_date = ensure_timezone_aware(start_date, timezone_str)
+    end_date = ensure_timezone_aware(end_date, timezone_str)
     
     # Get all schedules for the barber
     query = db.query(BarberSchedule).filter(BarberSchedule.barber_id == barber_id)
@@ -106,7 +108,7 @@ def check_schedule_conflicts(
     
     # Check each schedule for conflicts
     for schedule in schedules:
-        instances = get_recurring_instances(schedule, start_date, end_date)
+        instances = get_recurring_instances(schedule, start_date, end_date, timezone_str)
         for instance in instances:
             if (instance["start_datetime"] <= end_date and 
                 instance["end_datetime"] >= start_date):
@@ -266,4 +268,4 @@ def check_override_conflicts(
                 instance["end_datetime"] >= start_date):
                 return True
     
-    return False 
+    return False

@@ -124,6 +124,7 @@ class Shop(Base):
     advertisement_end_date = Column(DateTime, nullable=True)
     is_advertisement_active = Column(Boolean, default=False)
     is_open_24_hours = Column(Boolean, default=False)
+    timezone = Column(String, nullable=False, default="America/Los_Angeles")
 
     # Relationships
     owner = relationship("User", back_populates="shops")

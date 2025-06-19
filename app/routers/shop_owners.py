@@ -152,11 +152,13 @@ def create_shop(
         city=shop_in.city,
         state=shop_in.state,
         zip_code=shop_in.zip_code,
-        phone_number=shop_in.phone_number,        email=shop_in.email,
+        phone_number=shop_in.phone_number,
+        email=shop_in.email,
         owner_id=current_user.id,
         opening_time=shop_in.opening_time,
         closing_time=shop_in.closing_time,
         average_wait_time=shop_in.average_wait_time,
+        timezone=shop_in.timezone,
     )
     db.add(shop)
     db.flush()  # Flush to get the shop ID without committing the transaction
@@ -1682,7 +1684,7 @@ def get_barber_schedules(
     # Process recurring schedules
     recurring_instances = []
     for schedule in schedules:
-        instances = get_recurring_instances(schedule, start_date, end_date)
+        instances = get_recurring_instances(schedule, start_date, end_date, shop.timezone)
         for instance in instances:
             recurring_schedule = models.BarberSchedule(
                 id=schedule.id,
@@ -1736,7 +1738,7 @@ def update_barber_schedule(
         new_start = schedule_update.start_date or schedule.start_date
         new_end = schedule_update.end_date or schedule.end_date
         
-        if check_schedule_conflicts(db, barber.id, new_start, new_end, exclude_schedule_id=schedule.id):
+        if check_schedule_conflicts(db, barber.id, new_start, new_end, shop.timezone, exclude_schedule_id=schedule.id):
             raise HTTPException(
                 status_code=400,
                 detail="Schedule conflict: Another schedule exists for this time period"

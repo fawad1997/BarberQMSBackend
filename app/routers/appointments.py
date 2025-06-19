@@ -31,7 +31,7 @@ async def create_appointment(
         raise HTTPException(status_code=404, detail="Shop not found")
 
     # Check if shop is open at appointment time
-    appointment_time = ensure_timezone_aware(appointment_in.appointment_time)
+    appointment_time = ensure_timezone_aware(appointment_in.appointment_time, shop.timezone)
     appt_time = appointment_time.time()
     
     # Skip time validation for 24-hour shops
@@ -70,7 +70,7 @@ async def create_appointment(
         
         is_scheduled = False
         for schedule in barber_schedules:
-            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time, shop.timezone)
             for instance in instances:
                 if (instance["start_datetime"] <= appointment_time and 
                     instance["end_datetime"] >= appointment_end_time):
@@ -115,7 +115,7 @@ async def create_appointment(
                 
             is_scheduled = False
             for schedule in barber_schedules:
-                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time, shop.timezone)
                 for instance in instances:
                     if (instance["start_datetime"] <= appointment_time and 
                         instance["end_datetime"] >= appointment_end_time):
@@ -759,7 +759,7 @@ async def update_appointment(
 
     # If updating appointment time
     if appointment_update.appointment_time:
-        appointment_time = ensure_timezone_aware(appointment_update.appointment_time)
+        appointment_time = ensure_timezone_aware(appointment_update.appointment_time, shop.timezone)
         appt_time = appointment_time.time()
         
         # Skip time validation for 24-hour shops
@@ -798,7 +798,7 @@ async def update_appointment(
             
             is_scheduled = False
             for schedule in barber_schedules:
-                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+                instances = get_recurring_instances(schedule, appointment_time, appointment_end_time, shop.timezone)
                 for instance in instances:
                     if (instance["start_datetime"] <= appointment_time and 
                         instance["end_datetime"] >= appointment_end_time):
@@ -848,7 +848,7 @@ async def update_appointment(
         
         is_scheduled = False
         for schedule in barber_schedules:
-            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time)
+            instances = get_recurring_instances(schedule, appointment_time, appointment_end_time, shop.timezone)
             for instance in instances:
                 if (instance["start_datetime"] <= appointment_time and 
                     instance["end_datetime"] >= appointment_end_time):
