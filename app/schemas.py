@@ -301,10 +301,6 @@ class BusinessCreate(BaseModel):
     @field_validator('username')
     def validate_username_field(cls, v):
         return validate_username(v)
-    
-    @field_validator('timezone')
-    def validate_timezone_field(cls, v):
-        return validate_us_timezone(v)
 
     model_config = ConfigDict(from_attributes=True)
 
