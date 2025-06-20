@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app import models
 from typing import Optional, List, Tuple
+from datetime import datetime, timedelta, time
 
 def calculate_wait_time(
     db: Session, 
@@ -157,6 +158,40 @@ def is_business_open(business) -> bool:
         return current_time_only >= operating_hours.opening_time or current_time_only <= operating_hours.closing_time
     
     return operating_hours.opening_time <= current_time_only <= operating_hours.closing_time
+
+def is_shop_open(shop) -> bool:
+    """
+    Check if the shop is currently open based on operating hours
+    """
+    if shop.is_open_24_hours:
+        return True
+        
+    current_time = datetime.now()
+    current_day = current_time.weekday()  # Monday is 0, Sunday is 6
+    # Convert to our day_of_week format (Sunday is 0)
+    day_of_week = (current_day + 1) % 7
+    
+    # Get operating hours for current day
+    operating_hours = None
+    for hours in shop.operating_hours:
+        if hours.day_of_week == day_of_week:
+            operating_hours = hours
+            break
+    
+    if not operating_hours or operating_hours.is_closed:
+        return False
+    
+    if not operating_hours.opening_time or not operating_hours.closing_time:
+        return False
+    
+    current_time_only = current_time.time()
+    
+    # Handle overnight shop hours
+    if operating_hours.closing_time < operating_hours.opening_time:
+        return current_time_only >= operating_hours.opening_time or current_time_only <= operating_hours.closing_time
+    
+    return operating_hours.opening_time <= current_time_only <= operating_hours.closing_time
+
 
 def format_time(t: time) -> str:
     """

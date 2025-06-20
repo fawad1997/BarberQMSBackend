@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, time
+from datetime import datetime, time, timedelta
 from typing import List, Tuple, Optional
 from app.models import EmployeeSchedule, ScheduleRepeatFrequency, ScheduleOverride
 import pytz
@@ -137,6 +137,49 @@ def check_schedule_conflicts(
         else:
             # Both schedules are within a day
             return not (end_time <= existing_start or start_time >= existing_end)
+
+def get_recurring_instances(
+    schedule: EmployeeSchedule,
+    start_date: datetime,
+    end_date: datetime,
+    timezone_str: str = 'America/Los_Angeles'
+) -> List[dict]:
+    """
+    Generate recurring schedule instances for a regular employee schedule.
+    Returns a list of dictionaries containing start and end times for each instance.
+    """
+    instances = []
+    
+    # For regular schedules, we generate instances for each day in the date range
+    current_date = start_date.date()
+    end_date_only = end_date.date()
+    
+    while current_date <= end_date_only:
+        # Check if this day matches the schedule's day_of_week
+        day_of_week = (current_date.weekday() + 1) % 7  # Convert to our format
+        
+        if day_of_week == schedule.day_of_week and schedule.is_working:
+            if schedule.start_time and schedule.end_time:
+                # Create datetime objects for this day
+                start_datetime = datetime.combine(current_date, schedule.start_time)
+                end_datetime = datetime.combine(current_date, schedule.end_time)
+                
+                # Handle overnight shifts
+                if schedule.end_time < schedule.start_time:
+                    end_datetime = end_datetime + timedelta(days=1)
+                
+                # Make timezone-aware
+                start_datetime = ensure_timezone_aware(start_datetime, timezone_str)
+                end_datetime = ensure_timezone_aware(end_datetime, timezone_str)
+                
+                instances.append({
+                    "start_datetime": start_datetime,
+                    "end_datetime": end_datetime
+                })
+        
+        current_date += timedelta(days=1)
+    
+    return instances
 
 def get_recurring_override_instances(
     override: ScheduleOverride,

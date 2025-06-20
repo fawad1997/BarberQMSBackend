@@ -8,7 +8,6 @@ from enum import Enum
 import pytz
 import re
 
-# At the top of the file, add these imports
 TIMEZONE = pytz.timezone('America/Los_Angeles')
 UTC = pytz.UTC
 
@@ -144,6 +143,66 @@ class UserResponse(UserBase):
     @field_validator('created_at')
     def validate_created_at(cls, v):
         return validate_timezone(v)
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Shop schemas
+class ShopBase(BaseModel):
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[EmailStr] = None
+    average_wait_time: Optional[int] = None
+
+class ShopCreate(ShopBase):
+    pass
+
+class ShopUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[EmailStr] = None
+    average_wait_time: Optional[int] = None
+
+class ShopResponse(ShopBase):
+    id: int
+    owner_id: int
+    slug: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator('created_at', 'updated_at')
+    def validate_dates(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Shop Operating Hours schemas
+class ShopOperatingHoursBase(BaseModel):
+    day_of_week: int  # 0=Sunday, 1=Monday, ..., 6=Saturday
+    open_time: Optional[time] = None
+    close_time: Optional[time] = None
+    is_closed: bool = False
+
+class ShopOperatingHoursCreate(ShopOperatingHoursBase):
+    pass
+
+class ShopOperatingHoursUpdate(BaseModel):
+    open_time: Optional[time] = None
+    close_time: Optional[time] = None
+    is_closed: Optional[bool] = None
+
+class ShopOperatingHoursResponse(ShopOperatingHoursBase):
+    id: int
+    shop_id: int
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -362,6 +421,45 @@ class ServiceResponse(ServiceBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+# Barber schemas (alias for Employee)
+class BarberBase(BaseModel):
+    full_name: str
+    email: EmailStr
+    phone_number: str
+
+class BarberCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    phone_number: str
+    status: Optional[EmployeeStatus] = EmployeeStatus.AVAILABLE
+
+class BarberUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    status: Optional[EmployeeStatus] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+class BarberResponse(BaseModel):
+    id: int
+    user_id: int
+    business_id: int
+    status: EmployeeStatus
+    full_name: str
+    email: str
+    phone_number: str
+    is_active: bool
+    services: List[ServiceResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Queue-specific barber schemas
+class QueueBarberUpdate(BaseModel):
+    status: Optional[EmployeeStatus] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 # Then define EmployeeResponse which uses ServiceResponse
 class EmployeeResponse(BaseModel):
     id: int
@@ -463,6 +561,19 @@ class EmployeeScheduleResponse(EmployeeScheduleBase):
         return f"{self.start_time.strftime('%I:%M %p')} - {self.end_time.strftime('%I:%M %p')}"
 
     model_config = ConfigDict(from_attributes=True)
+
+# Barber schedule schemas (aliases for Employee schedules)
+class BarberScheduleBase(EmployeeScheduleBase):
+    pass
+
+class BarberScheduleCreate(EmployeeScheduleCreate):
+    pass
+
+class BarberScheduleUpdate(EmployeeScheduleUpdate):
+    pass
+
+class BarberScheduleResponse(EmployeeScheduleResponse):
+    pass
 
 # Update login schema
 class LoginRequest(BaseModel):

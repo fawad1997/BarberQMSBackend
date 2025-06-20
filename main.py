@@ -12,8 +12,8 @@ from app.routers import (
     feedback,
     unregistered_users,
     sso_routes,
-    schedules,
-    public
+    public,
+    shop_owners
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
@@ -116,7 +116,7 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
-app.include_router(schedules.router)  # Add the new schedules router
+app.include_router(shop_owners.router)  # Add the shop owners router
 app.include_router(public.router)
 app.include_router(websocket_router)  # Include WebSocket router
 
@@ -135,17 +135,7 @@ async def favicon():
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Favicon not found")
 
-# Debug route to capture and analyze the redirect issue
-@app.get("/debug-redirect")
-@app.post("/debug-redirect")
-async def debug_redirect(request: Request):
-    return {
-        "message": "Debug route for analyzing redirects",
-        "request_url": str(request.url),
-        "method": request.method,
-        "headers": dict(request.headers),
-        "client_host": request.client.host if request.client else None,
-    }
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

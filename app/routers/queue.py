@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List
 from datetime import datetime, timedelta
 from app import models, schemas
 from app.database import get_db
@@ -299,58 +299,3 @@ async def get_display_queue(
         raise HTTPException(status_code=404, detail="Business not found")
     
     return queue_data
-
-
-# Add a debug endpoint to see all appointments
-@router.get("/debug/appointments/{business_id}", response_model=List[Dict[str, Any]])
-async def debug_appointments(
-    business_id: int,
-    db: Session = Depends(get_db)
-):
-    """Debug endpoint to check all appointments for a business."""
-    # Get all appointments for this business
-    appointments = db.query(models.Appointment).filter(
-        models.Appointment.business_id == business_id
-    ).all()
-    
-    result = []
-    current_time = datetime.utcnow()
-    
-    for appt in appointments:
-        # Convert appointment time to Pacific timezone for display
-        appt_time_pacific = convert_to_pacific(appt.appointment_time) if appt.appointment_time else None
-        
-        # Format appointment time
-        formatted_time = appt_time_pacific.strftime("%I:%M %p") if appt_time_pacific else None
-        formatted_date = appt_time_pacific.strftime("%Y-%m-%d") if appt_time_pacific else None
-        
-        # Calculate if this appointment should be visible in the display queue
-        would_show = (
-            appt.status == AppointmentStatus.SCHEDULED and 
-            appt.appointment_time >= current_time
-        )
-        
-        # Get service name
-        service_name = "Unknown"
-        if appt.service_id:
-            service = db.query(models.Service).filter(models.Service.id == appt.service_id).first()
-            if service:
-                service_name = service.name
-        
-        result.append({
-            "id": appt.id,
-            "full_name": appt.full_name,
-            "status": str(appt.status),
-            "appointment_time_utc": str(appt.appointment_time) if appt.appointment_time else None,
-            "appointment_time": formatted_time,
-            "appointment_date": formatted_date,
-            "service": service_name,
-            "would_show_in_queue": would_show,
-            "reason_if_not_showing": None if would_show else (
-                "Status not SCHEDULED" if appt.status != AppointmentStatus.SCHEDULED else
-                "Appointment time in past" if appt.appointment_time < current_time else
-                "Unknown reason"
-            )
-        })
-    
-    return result

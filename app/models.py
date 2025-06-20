@@ -53,6 +53,9 @@ class EmployeeStatus(enum.Enum):
     ON_BREAK = "on_break"
     OFF = "off"
 
+# Alias for backward compatibility
+BarberStatus = EmployeeStatus
+
 
 # Enum for schedule types
 class ScheduleType(enum.Enum):
@@ -98,6 +101,7 @@ class User(Base):
 
     # Relationships
     businesses = relationship("Business", back_populates="owner", cascade="all, delete")
+    shops = relationship("Shop", back_populates="owner", cascade="all, delete")
     employee_profile = relationship(
         "Employee", uselist=False, back_populates="user", cascade="all, delete"
     )
@@ -410,6 +414,60 @@ class BusinessAdvertisement(Base):
 
     # Relationship
     business = relationship("Business", back_populates="advertisements")
+
+
+class Shop(Base):
+    __tablename__ = "shops"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    username = Column(String, unique=True, nullable=True, index=True)
+    address = Column(String, nullable=False)
+    city = Column(String, nullable=False)
+    state = Column(String, nullable=False)
+    zip_code = Column(String, nullable=False)
+    phone_number = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    average_wait_time = Column(Float, default=0.0)
+    has_advertisement = Column(Boolean, default=False)
+    advertisement_image_url = Column(String, nullable=True)
+    advertisement_start_date = Column(DateTime, nullable=True)
+    advertisement_end_date = Column(DateTime, nullable=True)
+    is_advertisement_active = Column(Boolean, default=False)
+    opening_time = Column(Time, nullable=True)
+    closing_time = Column(Time, nullable=True)
+    is_open_24_hours = Column(Boolean, default=False)
+    timezone = Column(String, nullable=False, default="America/Los_Angeles")
+
+    # Relationships
+    owner = relationship("User", back_populates="shops")
+    operating_hours = relationship(
+        "ShopOperatingHours", back_populates="shop", cascade="all, delete-orphan"
+    )
+
+
+class ShopOperatingHours(Base):
+    __tablename__ = "shop_operating_hours"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)  # 0=Sunday, 1=Monday, ..., 6=Saturday
+    opening_time = Column(Time, nullable=True)  # Null if closed that day
+    closing_time = Column(Time, nullable=True)  # Null if closed that day
+    is_closed = Column(Boolean, default=False)
+    
+    # Lunch break fields
+    lunch_break_start = Column(Time, nullable=True)
+    lunch_break_end = Column(Time, nullable=True)
+    
+    # Relationship
+    shop = relationship("Shop", back_populates="operating_hours")
+    
+    __table_args__ = (
+        UniqueConstraint('shop_id', 'day_of_week', name='uix_shop_day'),
+    )
 
 
 class ContactMessage(Base):

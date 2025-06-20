@@ -124,7 +124,6 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    print(form_data)
     user = db.query(models.User).filter(
         (models.User.email == form_data.username) |
         (models.User.phone_number == form_data.username)

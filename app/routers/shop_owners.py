@@ -21,7 +21,6 @@ router = APIRouter(prefix="/shop-owners", tags=["Shop Owners"])
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Define the dependency with explicit role check
 get_current_shop_owner = get_current_user_by_role(UserRole.SHOP_OWNER)
 
 UPLOAD_DIR = "static/advertisements"
@@ -60,7 +59,6 @@ def check_username_availability(
             message=str(e)
         )
 
-# Add this function after the imports but before the routes
 async def get_shop_by_id_or_slug(shop_id_or_slug: str, db: Session, user_id: int):
     """Helper function to get a shop by ID, slug, or username and verify ownership."""
     try:
@@ -498,7 +496,6 @@ async def add_barber(
     user = user_by_email
     
     try:
-        # Import the needed modules
         import secrets
         from datetime import timedelta, datetime
         from app.schemas import TIMEZONE, convert_to_utc

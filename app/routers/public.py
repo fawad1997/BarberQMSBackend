@@ -12,7 +12,6 @@ router = APIRouter(
     tags=["public"]
 )
 
-# Add this helper function after imports but before routes
 async def get_public_business_by_id_or_slug(business_id_or_slug: str, db: Session):
     """Helper function to get a business by ID, slug, or username for public access."""
     try:
@@ -65,4 +64,4 @@ async def check_in_to_salon(
     queue_entry.business_id = business.id
     
     # Continue with existing code
-    # ... 
+    # ...
