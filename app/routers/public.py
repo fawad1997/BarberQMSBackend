@@ -3,8 +3,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Business
 from app.schemas import BusinessDetailedResponse, SimplifiedQueueResponse, QueueEntryCreatePublic, QueueEntryPublicResponse
+from app.utils.shop_utils import is_shop_open, calculate_wait_time
+from typing import List, Optional
+from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/public",
+    tags=["public"]
+)
 
 # Add this helper function after imports but before routes
 async def get_public_business_by_id_or_slug(business_id_or_slug: str, db: Session):

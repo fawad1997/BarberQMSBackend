@@ -285,6 +285,7 @@ class BusinessBase(BaseModel):
 
 class BusinessCreate(BaseModel):
     name: str
+    username: str
     address: str
     city: str
     state: str
@@ -294,13 +295,21 @@ class BusinessCreate(BaseModel):
     average_wait_time: Optional[float] = 0.0
     operating_hours: Optional[List[BusinessOperatingHoursCreate]] = None
     slug: Optional[str] = None
-    username: str  # Username is now required
     description: Optional[str] = None
     logo_url: Optional[str] = None
+    has_advertisement: bool = False
+    is_advertisement_active: bool = False
+    opening_time: time = time(9, 0)  # Default opening time 9:00 AM
+    closing_time: time = time(17, 0)  # Default closing time 5:00 PM
+    timezone: str = "America/Los_Angeles"  # Default timezone
 
     @field_validator('username')
     def validate_username_field(cls, v):
         return validate_username(v)
+
+    @field_validator('timezone')
+    def validate_timezone_field(cls, v):
+        return validate_us_timezone(v)
 
     model_config = ConfigDict(from_attributes=True)
 

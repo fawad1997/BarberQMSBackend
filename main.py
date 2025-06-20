@@ -12,17 +12,19 @@ from app.routers import (
     feedback,
     unregistered_users,
     sso_routes,
+    schedules,
     public
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
+from app.database import init_db, engine
 import uvicorn
 from dotenv import load_dotenv
 import os
 import logging
 import asyncio
 from fastapi.responses import FileResponse
+from app import models
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,10 @@ origins = [
     "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
+    "https://walkinonline.app",
+    "https://www.walkinonline.app",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:3000",
     "*"
 ]
 
@@ -97,6 +103,7 @@ def on_startup():
     init_db()
     logger.info("Database initialized")
     logger.info(f"WebSocket routes available at: {[route.path for route in app.routes if str(route.path).startswith('/ws/')]}")
+    models.Base.metadata.create_all(bind=engine)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
@@ -109,9 +116,9 @@ app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
+app.include_router(schedules.router)  # Add the new schedules router
 app.include_router(public.router)
 app.include_router(websocket_router)  # Include WebSocket router
-
 
 @app.get("/")
 def read_root():
