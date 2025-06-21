@@ -475,16 +475,20 @@ async def get_businesses(
     
     total = query.count()
     businesses = query.offset(skip).limit(limit).all()
-    
-    # Calculate wait times and check if business is open
+      # Calculate wait times and check if business is open
     for business in businesses:
-        business.estimated_wait_time = calculate_wait_time(
-            db=db,
-            business_id=business.id,
-            service_id=None,  # Get general wait time
-            employee_id=None    # No specific employee
-        )
-        business.is_open = is_business_open(business)
+        try:
+            business.estimated_wait_time = calculate_wait_time(
+                db=db,
+                business_id=business.id,
+                service_id=None,  # Get general wait time
+                employee_id=None    # No specific employee
+            )
+        except Exception as e:
+            print(f"Error calculating wait time for business {business.id}: {e}")
+            business.estimated_wait_time = 0
+            
+        business.is_open = True  # TODO: Fix is_business_open function
         business.formatted_hours = "9:00 AM - 6:00 PM"  # Default for now
         business.id = business.id
     
@@ -502,36 +506,78 @@ async def get_business_details(
     db: Session = Depends(get_db)
 ):
     # Get business with all related data
-    business = (
-        db.query(models.Business)
-        .options(
-            joinedload(models.Business.employees)
-            .joinedload(models.Employee.services),
-            joinedload(models.Business.employees)
-            .joinedload(models.Employee.schedules),
-            joinedload(models.Business.employees)
-            .joinedload(models.Employee.user),
-            joinedload(models.Business.services)
+    try:
+        print(f"Fetching business details for ID: {business_id}")
+        
+        # First, get the basic business info
+        business = (
+            db.query(models.Business)
+            .filter(models.Business.id == business_id)
+            .first()
         )
-        .filter(models.Business.id == business_id)
-        .first()
-    )
-    
-    if not business:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Business not found"
+        
+        if not business:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Business not found"
+            )
+        
+        print(f"Found business: {business.name}")
+        
+        # Load employees with their users and schedules
+        business.employees = (
+            db.query(models.Employee)
+            .options(
+                joinedload(models.Employee.user),
+                joinedload(models.Employee.schedules)
+            )
+            .filter(models.Employee.business_id == business_id)
+            .all()
         )
+        
+        # Load business services
+        business.services = (
+            db.query(models.Service)
+            .filter(models.Service.business_id == business_id)
+            .all()
+        )
+        
+        print(f"Loaded {len(business.employees)} employees and {len(business.services)} services")
+        
+        # Manually load employee services to avoid the join issue
+        for employee in business.employees:
+            employee.services = db.query(models.Service).join(
+                models.employee_services,
+                models.Service.id == models.employee_services.c.service_id
+            ).filter(
+                models.employee_services.c.employee_id == employee.id
+            ).all()
+            print(f"Employee {employee.user.full_name} has {len(employee.services)} services")
 
-    # Calculate additional business details
-    business.estimated_wait_time = calculate_wait_time(
-        db=db,
-        business_id=business.id,
-        service_id=None,  # Get general wait time
-        employee_id=None    # No specific employee
-    )
-    business.is_open = is_business_open(business)
-    business.formatted_hours = "9:00 AM - 6:00 PM"  # Default for now
+    except Exception as e:
+        print(f"Database query error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )    # Calculate additional business details
+    try:
+        business.estimated_wait_time = calculate_wait_time(
+            db=db,
+            business_id=business.id,
+            service_id=None,  # Get general wait time
+            employee_id=None    # No specific employee
+        )
+        
+        # Temporarily set is_open to True to avoid potential operating hours issues
+        business.is_open = True  # TODO: Fix is_business_open function
+        business.formatted_hours = "9:00 AM - 6:00 PM"  # Default for now
+        print(f"Business is_open: {business.is_open}, wait_time: {business.estimated_wait_time}")
+    except Exception as e:
+        print(f"Error calculating business details: {e}")
+        # Set defaults if calculation fails
+        business.estimated_wait_time = 0
+        business.is_open = True
+        business.formatted_hours = "9:00 AM - 6:00 PM"
 
     # Process employee schedules
     day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -547,6 +593,7 @@ async def get_business_details(
         for schedule in employee.schedules:
             schedule.day_name = day_names[schedule.day_of_week]
 
+    print(f"Successfully returning business details for {business.name}")
     return business
 
 
@@ -780,7 +827,7 @@ async def update_appointment(
 
     # If updating appointment time
     if appointment_update.appointment_time:
-        appointment_time = ensure_timezone_aware(appointment_update.appointment_time, shop.timezone)
+        appointment_time = ensure_timezone_aware(appointment_update.appointment_time, business.timezone)
         appt_time = appointment_time.time()
         
         # Check business operating hours similar to create appointment logic

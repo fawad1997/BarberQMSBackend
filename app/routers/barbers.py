@@ -113,6 +113,11 @@ def create_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
     # Check for schedule conflicts
     if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date, shop.timezone):
         raise HTTPException(
@@ -144,6 +149,11 @@ def get_my_schedules(
     barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
 
     # Get base schedules
     query = db.query(models.BarberSchedule).filter(
@@ -206,6 +216,11 @@ def update_schedule(
     barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
 
     schedule = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.id == schedule_id,
