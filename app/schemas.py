@@ -339,7 +339,6 @@ class BusinessBase(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     is_open_24_hours: Optional[bool] = False
-    timezone: str = "America/Los_Angeles"  # Add timezone field
 
     model_config = ConfigDict(from_attributes=True)
 

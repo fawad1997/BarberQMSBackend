@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from app.core.dependencies import get_current_active_user
 from sqlalchemy import func, DateTime, Interval, cast, Text
-from app.utils.shop_utils import calculate_wait_time, format_time, is_business_open, get_business_formatted_hours
+from app.utils.shop_utils import calculate_wait_time, format_time, is_business_open
 from sqlalchemy.orm import joinedload
 import asyncio
 from app.models import EmployeeStatus, AppointmentStatus, QueueStatus
@@ -475,8 +475,7 @@ async def get_businesses(
     
     total = query.count()
     businesses = query.offset(skip).limit(limit).all()
-    
-    # Calculate wait times and check if business is open
+      # Calculate wait times and check if business is open
     for business in businesses:
         try:
             business.estimated_wait_time = calculate_wait_time(
@@ -490,7 +489,7 @@ async def get_businesses(
             business.estimated_wait_time = 0
             
         business.is_open = True  # TODO: Fix is_business_open function
-        business.formatted_hours = get_business_formatted_hours(business)
+        business.formatted_hours = "9:00 AM - 6:00 PM"  # Default for now
         business.id = business.id
     
     return {
@@ -568,15 +567,17 @@ async def get_business_details(
             service_id=None,  # Get general wait time
             employee_id=None    # No specific employee
         )
-          # Temporarily set is_open to True to avoid potential operating hours issues
+        
+        # Temporarily set is_open to True to avoid potential operating hours issues
         business.is_open = True  # TODO: Fix is_business_open function
-        business.formatted_hours = get_business_formatted_hours(business)
+        business.formatted_hours = "9:00 AM - 6:00 PM"  # Default for now
         print(f"Business is_open: {business.is_open}, wait_time: {business.estimated_wait_time}")
     except Exception as e:
-        print(f"Error calculating business details: {e}")        # Set defaults if calculation fails
+        print(f"Error calculating business details: {e}")
+        # Set defaults if calculation fails
         business.estimated_wait_time = 0
         business.is_open = True
-        business.formatted_hours = get_business_formatted_hours(business)
+        business.formatted_hours = "9:00 AM - 6:00 PM"
 
     # Process employee schedules
     day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']

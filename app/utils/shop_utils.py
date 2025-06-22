@@ -4,7 +4,6 @@ from sqlalchemy import and_, or_
 from app import models
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta, time
-import pytz
 
 def calculate_wait_time(
     db: Session, 
@@ -199,37 +198,3 @@ def format_time(t: time) -> str:
     Format time in 12-hour format with AM/PM
     """
     return t.strftime("%I:%M %p")
-
-def get_business_formatted_hours(business) -> str:
-    """
-    Get formatted hours string for a business based on operating hours and timezone.
-    Returns hours in the business's timezone.
-    """
-    if not business or not business.operating_hours:
-        return "Hours not available"
-    
-    # Get current day of week (0=Sunday, 6=Saturday)
-    business_tz = pytz.timezone(business.timezone)
-    current_time = datetime.now(business_tz)
-    current_day = current_time.weekday()  # Monday is 0, Sunday is 6
-    # Convert to our day_of_week format (Sunday is 0)
-    day_of_week = (current_day + 1) % 7
-    
-    # Get today's operating hours
-    today_hours = None
-    for hours in business.operating_hours:
-        if hours.day_of_week == day_of_week:
-            today_hours = hours
-            break
-    
-    if not today_hours or today_hours.is_closed:
-        # Try to find any open day to show general hours
-        for hours in business.operating_hours:
-            if not hours.is_closed and hours.opening_time and hours.closing_time:
-                return f"{format_time(hours.opening_time)} - {format_time(hours.closing_time)} (General hours)"
-        return "Closed"
-    
-    if not today_hours.opening_time or not today_hours.closing_time:
-        return "Closed"
-    
-    return f"{format_time(today_hours.opening_time)} - {format_time(today_hours.closing_time)}"
