@@ -88,6 +88,7 @@ def create_business(
     current_user: models.User = Depends(get_current_business_owner)
 ):
     """Create a new business."""
+    
     # Check if the user is already the owner of 10 businesses
     existing_businesses_count = db.query(models.Business).filter(models.Business.owner_id == current_user.id).count()
     if existing_businesses_count >= 10:
@@ -131,9 +132,7 @@ def create_business(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Business with slug '{slug}' already exists. Please choose a different name."
-            )
-
-    # Create business
+            )    # Create business
     business = models.Business(
         name=business_in.name,
         slug=slug,
@@ -147,8 +146,8 @@ def create_business(
         owner_id=current_user.id,
         average_wait_time=business_in.average_wait_time,
         description=business_in.description,
-        logo_url=business_in.logo_url,
-    )
+        logo_url=business_in.logo_url,        timezone=business_in.timezone,    )
+    
     db.add(business)
     db.flush()  # Flush to get the business ID without committing the transaction
 

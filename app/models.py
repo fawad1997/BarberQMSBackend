@@ -130,6 +130,7 @@ class Business(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     average_wait_time = Column(Float, default=0.0)
     is_open_24_hours = Column(Boolean, default=False)
+    timezone = Column(String, nullable=False, default="America/Los_Angeles")
     
     # New fields
     description = Column(Text, nullable=True)
