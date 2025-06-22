@@ -146,9 +146,8 @@ def create_business(
         owner_id=current_user.id,
         average_wait_time=business_in.average_wait_time,
         description=business_in.description,
-        logo_url=business_in.logo_url,        timezone=business_in.timezone,
-    )
-    print(f"🔍 Created business object with timezone: {business.timezone}")
+        logo_url=business_in.logo_url,        timezone=business_in.timezone,    )
+    
     db.add(business)
     db.flush()  # Flush to get the business ID without committing the transaction
 
@@ -162,20 +161,16 @@ def create_business(
                 closing_time=hours.closing_time,
                 is_closed=hours.is_closed,
                 lunch_break_start=hours.lunch_break_start,
-                lunch_break_end=hours.lunch_break_end
-            )
+                lunch_break_end=hours.lunch_break_end            )
             db.add(operating_hours)
     else:
-        # Create default operating hours (open every day 9-5)
-        default_opening = datetime.strptime("09:00", "%H:%M").time()
-        default_closing = datetime.strptime("17:00", "%H:%M").time()
-        
+        # Create default operating hours using the provided opening and closing times
         for day in range(7):
             operating_hours = models.BusinessOperatingHours(
                 business_id=business.id,
                 day_of_week=day,
-                opening_time=default_opening,
-                closing_time=default_closing,
+                opening_time=business_in.opening_time,
+                closing_time=business_in.closing_time,
                 is_closed=False
             )
             db.add(operating_hours)

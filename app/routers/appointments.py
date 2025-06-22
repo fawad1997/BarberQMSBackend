@@ -28,17 +28,28 @@ async def create_appointment(
     # Check if the business exists
     business = db.query(models.Business).filter(models.Business.id == appointment_in.business_id).first()
     if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-
-    # Check if business is open at appointment time
-    appointment_time = ensure_timezone_aware(appointment_in.appointment_time)
-    appt_time = appointment_time.time()
+        raise HTTPException(status_code=404, detail="Business not found")    # Check if business is open at appointment time
+    # Frontend sends user's selected time, we need to interpret it in user's timezone
+    # and convert it to business timezone for validation
+    
+    # Get user timezone from the request, default to business timezone if not provided
+    user_timezone_str = appointment_in.user_timezone or business.timezone
+    
+    # Ensure the appointment time is timezone-aware in user's timezone
+    appointment_time = ensure_timezone_aware(appointment_in.appointment_time, user_timezone_str)
+    
+    # Convert appointment time to business timezone for proper validation
+    import pytz
+    business_tz = pytz.timezone(business.timezone)
+    appointment_time_in_business_tz = appointment_time.astimezone(business_tz)
+    appt_time = appointment_time_in_business_tz.time()
     
     # TODO: Update to check business operating hours from business_operating_hours table
     # For now, skip time validation if business is 24 hours
     if not business.is_open_24_hours:
         # Get business operating hours for the appointment day
-        day_of_week = appointment_time.weekday()  # 0=Monday, 6=Sunday
+        # Use the business timezone date for day of week calculation
+        day_of_week = appointment_time_in_business_tz.weekday()  # 0=Monday, 6=Sunday
         # Convert to our format (0=Sunday, 1=Monday, etc.)
         our_day_format = (day_of_week + 1) % 7
         
@@ -48,10 +59,28 @@ async def create_appointment(
         ).first()
         
         if operating_hours and operating_hours.is_closed:
-            raise HTTPException(status_code=400, detail="Business is closed on this day")
+            raise HTTPException(status_code=400, detail="Business is closed on this day")        
         elif operating_hours and operating_hours.opening_time and operating_hours.closing_time:
-            if not (operating_hours.opening_time <= appt_time <= operating_hours.closing_time):
-                raise HTTPException(status_code=400, detail="Appointment time is outside business operating hours")
+            # Handle overnight hours (e.g., 4:43 PM - 4:43 AM)
+            opening_time = operating_hours.opening_time
+            closing_time = operating_hours.closing_time
+            
+            is_within_hours = False
+            if closing_time < opening_time:
+                # Overnight hours - check if time is after opening OR before closing
+                is_within_hours = (appt_time >= opening_time) or (appt_time <= closing_time)
+            else:
+                # Normal hours - check if time is between opening and closing
+                is_within_hours = opening_time <= appt_time <= closing_time
+            
+            if not is_within_hours:
+                # Enhanced error message with timezone information
+                from app.utils.shop_utils import get_business_formatted_hours
+                business_hours = get_business_formatted_hours(business)
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Appointment time is outside business operating hours ({business_hours})"
+                )
 
     # If service is provided, validate and get duration
     service_duration = 30  # Default duration in minutes
@@ -822,17 +851,25 @@ async def update_appointment(
     # Check if the shop exists
     business = db.query(models.Business).filter(models.Business.id == appointment.business_id).first()
     if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-
-    # If updating appointment time
+        raise HTTPException(status_code=404, detail="Business not found")    # If updating appointment time
     if appointment_update.appointment_time:
-        appointment_time = ensure_timezone_aware(appointment_update.appointment_time, business.timezone)
-        appt_time = appointment_time.time()
+        # Get user timezone from the request, default to business timezone if not provided
+        user_timezone_str = appointment_update.user_timezone or business.timezone
+        
+        # Ensure the appointment time is timezone-aware in user's timezone
+        appointment_time = ensure_timezone_aware(appointment_update.appointment_time, user_timezone_str)
+        
+        # Convert appointment time to business timezone for proper validation
+        import pytz
+        business_tz = pytz.timezone(business.timezone)
+        appointment_time_in_business_tz = appointment_time.astimezone(business_tz)
+        appt_time = appointment_time_in_business_tz.time()
         
         # Check business operating hours similar to create appointment logic
         if not business.is_open_24_hours:
             # Get business operating hours for the appointment day
-            day_of_week = appointment_time.weekday()  # 0=Monday, 6=Sunday
+            # Use the business timezone date for day of week calculation
+            day_of_week = appointment_time_in_business_tz.weekday()  # 0=Monday, 6=Sunday
             # Convert to our format (0=Sunday, 1=Monday, etc.)
             our_day_format = (day_of_week + 1) % 7
             
@@ -842,10 +879,27 @@ async def update_appointment(
             ).first()
             
             if operating_hours and operating_hours.is_closed:
-                raise HTTPException(status_code=400, detail="Business is closed on this day")
+                raise HTTPException(status_code=400, detail="Business is closed on this day")            
             elif operating_hours and operating_hours.opening_time and operating_hours.closing_time:
-                if not (operating_hours.opening_time <= appt_time <= operating_hours.closing_time):
-                    raise HTTPException(status_code=400, detail="Appointment time is outside business operating hours")
+                # Handle overnight hours (e.g., 4:43 PM - 4:43 AM)
+                opening_time = operating_hours.opening_time
+                closing_time = operating_hours.closing_time
+                
+                is_within_hours = False
+                if closing_time < opening_time:
+                    # Overnight hours - check if time is after opening OR before closing
+                    is_within_hours = (appt_time >= opening_time) or (appt_time <= closing_time)
+                else:
+                    # Normal hours - check if time is between opening and closing
+                    is_within_hours = opening_time <= appt_time <= closing_time
+                
+                if not is_within_hours:
+                    # Enhanced error message with timezone information
+                    business_hours = get_business_formatted_hours(business)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Appointment time is outside business operating hours ({business_hours})"
+                    )
 
         # Get service duration
         service_duration = 30  # Default duration

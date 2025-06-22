@@ -1,7 +1,7 @@
 # app/schemas.py
 
 from pydantic import BaseModel, EmailStr, ConfigDict, computed_field, field_validator, Field
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime, timezone, time, timedelta, date
 from app.models import AppointmentStatus, EmployeeStatus, QueueStatus, ScheduleRepeatFrequency, OverrideType
 from enum import Enum
@@ -238,6 +238,7 @@ class AppointmentCreate(AppointmentBase):
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     notes: Optional[str] = None
+    user_timezone: Optional[str] = None  # User's timezone for proper time conversion
 
     @field_validator('full_name', 'phone_number')
     def validate_guest_fields(cls, v, info):
@@ -359,9 +360,31 @@ class BusinessCreate(BaseModel):
     logo_url: Optional[str] = None
     has_advertisement: bool = False
     is_advertisement_active: bool = False
-    opening_time: time = time(9, 0)  # Default opening time 9:00 AM
-    closing_time: time = time(17, 0)  # Default closing time 5:00 PM
+    opening_time: Union[str, time] = time(9, 0)  # Default opening time 9:00 AM
+    closing_time: Union[str, time] = time(17, 0)  # Default closing time 5:00 PM
     timezone: str = "America/Los_Angeles"  # Default timezone
+
+    @field_validator('opening_time')
+    def validate_opening_time(cls, v):
+        if isinstance(v, str):
+            if not v.strip():  # Empty or whitespace string, use default
+                return time(9, 0)
+            try:
+                return datetime.strptime(v.strip(), "%H:%M").time()
+            except ValueError:
+                raise ValueError(f"Invalid opening time format. Expected HH:MM, got: {v}")
+        return v
+
+    @field_validator('closing_time')
+    def validate_closing_time(cls, v):
+        if isinstance(v, str):
+            if not v.strip():  # Empty or whitespace string, use default
+                return time(17, 0)
+            try:
+                return datetime.strptime(v.strip(), "%H:%M").time()
+            except ValueError:
+                raise ValueError(f"Invalid closing time format. Expected HH:MM, got: {v}")
+        return v
 
     @field_validator('username')
     def validate_username_field(cls, v):
@@ -795,6 +818,7 @@ class AppointmentUpdate(BaseModel):
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     notes: Optional[str] = None
+    user_timezone: Optional[str] = None  # User's timezone for proper time conversion
 
     @field_validator('appointment_time')
     def validate_appointment_time(cls, v):
