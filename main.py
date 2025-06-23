@@ -4,24 +4,27 @@ from fastapi.staticfiles import StaticFiles
 from app.routers import (
     auth,
     users,
-    shop_owners,
-    barbers,
+    business_owners,
+    employees,
     admin,
     appointments,
     queue,
     feedback,
     unregistered_users,
-    sso_routes
+    sso_routes,
+    public,
+    shop_owners
 )
 from app.websockets.router import router as websocket_router  # Import the router object, not the module
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
+from app.database import init_db, engine
 import uvicorn
 from dotenv import load_dotenv
 import os
 import logging
 import asyncio
 from fastapi.responses import FileResponse
+from app import models
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,10 @@ origins = [
     "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
+    "https://walkinonline.app",
+    "https://www.walkinonline.app",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:3000",
     "*"
 ]
 
@@ -96,20 +103,22 @@ def on_startup():
     init_db()
     logger.info("Database initialized")
     logger.info(f"WebSocket routes available at: {[route.path for route in app.routes if str(route.path).startswith('/ws/')]}")
+    models.Base.metadata.create_all(bind=engine)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
 app.include_router(sso_routes.router)
 app.include_router(users.router)
-app.include_router(shop_owners.router)
-app.include_router(barbers.router)
+app.include_router(business_owners.router)
+app.include_router(employees.router)
 app.include_router(admin.router)
 app.include_router(appointments.router)
 app.include_router(queue.router)
 app.include_router(feedback.router)
 app.include_router(unregistered_users.router)
+app.include_router(shop_owners.router)  # Add the shop owners router
+app.include_router(public.router)
 app.include_router(websocket_router)  # Include WebSocket router
-
 
 @app.get("/")
 def read_root():
@@ -126,17 +135,7 @@ async def favicon():
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Favicon not found")
 
-# Debug route to capture and analyze the redirect issue
-@app.get("/debug-redirect")
-@app.post("/debug-redirect")
-async def debug_redirect(request: Request):
-    return {
-        "message": "Debug route for analyzing redirects",
-        "request_url": str(request.url),
-        "method": request.method,
-        "headers": dict(request.headers),
-        "client_host": request.client.host if request.client else None,
-    }
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

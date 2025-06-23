@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from app import models, schemas
 from app.database import get_db
 from app.core.dependencies import get_current_user_by_role
@@ -21,7 +21,6 @@ router = APIRouter(prefix="/shop-owners", tags=["Shop Owners"])
 # Initialize logger
 logger = logging.getLogger(__name__)
 
-# Define the dependency with explicit role check
 get_current_shop_owner = get_current_user_by_role(UserRole.SHOP_OWNER)
 
 UPLOAD_DIR = "static/advertisements"
@@ -60,7 +59,6 @@ def check_username_availability(
             message=str(e)
         )
 
-# Add this function after the imports but before the routes
 async def get_shop_by_id_or_slug(shop_id_or_slug: str, db: Session, user_id: int):
     """Helper function to get a shop by ID, slug, or username and verify ownership."""
     try:
@@ -91,38 +89,36 @@ def create_shop(
     current_user: models.User = Depends(get_current_shop_owner)
 ):
     """Create a new shop."""
-    # Check if the user is already the owner of 10 shops
-    existing_shops_count = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).count()
-    if existing_shops_count >= 10:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot create more than 10 shops."
-        )    # Handle username validation and availability - username is now required
-    username = None
-    if shop_in.username:
+    try:
+        logger.info(f"Creating shop for user {current_user.id}")
+        logger.debug(f"Shop data: {shop_in.dict()}")
+
+        # Check if the user is already the owner of 10 shops
+        existing_shops_count = db.query(models.Shop).filter(models.Shop.owner_id == current_user.id).count()
+        if existing_shops_count >= 10:
+            logger.warning(f"User {current_user.id} attempted to create more than 10 shops")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot create more than 10 shops."
+            )
+
+        # Handle username validation and availability
         try:
             username = schemas.validate_username(shop_in.username)
             if not schemas.is_username_available(username, db):
+                logger.warning(f"Username {username} is already taken")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Username '{username}' is already taken"
                 )
         except ValueError as e:
+            logger.error(f"Username validation error: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
-    else:
-        # Generate username from shop name if not provided
-        base_username = schemas.generate_slug(shop_in.name)
-        username = base_username
-        counter = 1
-        
-        # Ensure username is unique
-        while not schemas.is_username_available(username, db):
-            username = f"{base_username}-{counter}"
-            counter += 1# Generate slug if not provided
-    if not shop_in.slug:
+
+        # Generate slug from shop name
         base_slug = schemas.generate_slug(shop_in.name)
         slug = base_slug
         counter = 1
@@ -131,63 +127,79 @@ def create_shop(
         while db.query(models.Shop).filter(models.Shop.slug == slug).first():
             slug = f"{base_slug}-{counter}"
             counter += 1
-    else:
-        # If slug is provided, ensure it's properly formatted
-        slug = schemas.generate_slug(shop_in.slug)
+
+        logger.debug(f"Generated slug: {slug}")
+
+        # Create shop with the generated/validated slug and username
+        shop = models.Shop(
+            name=shop_in.name,
+            slug=slug,
+            username=username,
+            address=shop_in.address,
+            city=shop_in.city,
+            state=shop_in.state,
+            zip_code=shop_in.zip_code,
+            phone_number=shop_in.phone_number,
+            email=shop_in.email,
+            owner_id=current_user.id,
+            opening_time=shop_in.opening_time,
+            closing_time=shop_in.closing_time,
+            average_wait_time=shop_in.average_wait_time,
+            timezone=shop_in.timezone,
+        )
+        db.add(shop)
+        db.flush()  # Flush to get the shop ID without committing the transaction
+
+        logger.debug("Created shop record")
+
+        # Create operating hours
+        if shop_in.operating_hours:
+            logger.debug(f"Creating {len(shop_in.operating_hours)} operating hours records")
+            for hours in shop_in.operating_hours:
+                operating_hours = models.ShopOperatingHours(
+                    shop_id=shop.id,
+                    day_of_week=hours.day_of_week,
+                    opening_time=hours.opening_time or shop_in.opening_time,
+                    closing_time=hours.closing_time or shop_in.closing_time,
+                    is_closed=hours.is_closed
+                )
+                db.add(operating_hours)
+        else:
+            logger.debug("Creating default operating hours")
+            # Create default operating hours (open every day with shop's default hours)
+            for day in range(7):
+                operating_hours = models.ShopOperatingHours(
+                    shop_id=shop.id,
+                    day_of_week=day,
+                    opening_time=shop_in.opening_time,
+                    closing_time=shop_in.closing_time,
+                    is_closed=day == 0  # Closed on Sunday
+                )
+                db.add(operating_hours)
+
+        db.commit()
+        db.refresh(shop)
         
-        # Check if the slug already exists
-        existing_shop = db.query(models.Shop).filter(models.Shop.slug == slug).first()
-        if existing_shop:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Shop with slug '{slug}' already exists. Please choose a different name."
-            )
+        logger.info(f"Successfully created shop {shop.id}")
+        return shop
 
-    # Create shop with the generated/validated slug and username
-    shop = models.Shop(
-        name=shop_in.name,
-        slug=slug,
-        username=username,
-        address=shop_in.address,
-        city=shop_in.city,
-        state=shop_in.state,
-        zip_code=shop_in.zip_code,
-        phone_number=shop_in.phone_number,        email=shop_in.email,
-        owner_id=current_user.id,
-        opening_time=shop_in.opening_time,
-        closing_time=shop_in.closing_time,
-        average_wait_time=shop_in.average_wait_time,
-    )
-    db.add(shop)
-    db.flush()  # Flush to get the shop ID without committing the transaction
+    except Exception as e:
+        logger.error(f"Error creating shop: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while creating the shop: {str(e)}"
+        )
 
-    # Create operating hours
-    if shop_in.operating_hours:
-        for hours in shop_in.operating_hours:
-            operating_hours = models.ShopOperatingHours(
-                shop_id=shop.id,
-                day_of_week=hours.day_of_week,
-                opening_time=hours.opening_time,
-                closing_time=hours.closing_time,
-                is_closed=hours.is_closed
-            )
-            db.add(operating_hours)
-    else:
-        # Create default operating hours (open every day with shop's default hours)
-        for day in range(7):
-            operating_hours = models.ShopOperatingHours(
-                shop_id=shop.id,
-                day_of_week=day,
-                opening_time=shop_in.opening_time,
-                closing_time=shop_in.closing_time,
-                is_closed=False
-            )
-            db.add(operating_hours)
-
-    db.commit()
-    db.refresh(shop)
-    
-    return shop
+# Add duplicate route without trailing slash to prevent redirects
+@router.post("/shops", response_model=schemas.ShopResponse)
+def create_shop_no_slash(
+    shop_in: schemas.ShopCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_shop_owner)
+):
+    """Create a new shop (no trailing slash version)"""
+    return create_shop(shop_in=shop_in, db=db, current_user=current_user)
 
 @router.get("/shops/", response_model=List[schemas.ShopResponse])
 async def get_my_shops(
@@ -484,7 +496,6 @@ async def add_barber(
     user = user_by_email
     
     try:
-        # Import the needed modules
         import secrets
         from datetime import timedelta, datetime
         from app.schemas import TIMEZONE, convert_to_utc
@@ -1682,7 +1693,7 @@ def get_barber_schedules(
     # Process recurring schedules
     recurring_instances = []
     for schedule in schedules:
-        instances = get_recurring_instances(schedule, start_date, end_date)
+        instances = get_recurring_instances(schedule, start_date, end_date, shop.timezone)
         for instance in instances:
             recurring_schedule = models.BarberSchedule(
                 id=schedule.id,
@@ -1736,7 +1747,7 @@ def update_barber_schedule(
         new_start = schedule_update.start_date or schedule.start_date
         new_end = schedule_update.end_date or schedule.end_date
         
-        if check_schedule_conflicts(db, barber.id, new_start, new_end, exclude_schedule_id=schedule.id):
+        if check_schedule_conflicts(db, barber.id, new_start, new_end, shop.timezone, exclude_schedule_id=schedule.id):
             raise HTTPException(
                 status_code=400,
                 detail="Schedule conflict: Another schedule exists for this time period"

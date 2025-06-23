@@ -1,62 +1,67 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.database.database import get_db
-from app.models import Shop
-from app.schemas import ShopDetailedResponse, SimplifiedQueueResponse, QueueEntryCreatePublic, QueueEntryPublicResponse
+from app.database import get_db
+from app.models import Business
+from app.schemas import BusinessDetailedResponse, SimplifiedQueueResponse, QueueEntryCreatePublic, QueueEntryPublicResponse
+from app.utils.shop_utils import is_shop_open, calculate_wait_time
+from typing import List, Optional
+from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/public",
+    tags=["public"]
+)
 
-# Add this helper function after imports but before routes
-async def get_public_shop_by_id_or_slug(shop_id_or_slug: str, db: Session):
-    """Helper function to get a shop by ID, slug, or username for public access."""
+async def get_public_business_by_id_or_slug(business_id_or_slug: str, db: Session):
+    """Helper function to get a business by ID, slug, or username for public access."""
     try:
-        shop_id = int(shop_id_or_slug)
-        shop = db.query(Shop).filter(Shop.id == shop_id).first()
+        business_id = int(business_id_or_slug)
+        business = db.query(Business).filter(Business.id == business_id).first()
     except ValueError:
         # If not an integer, treat as slug or username
-        shop = db.query(Shop).filter(
-            (Shop.slug == shop_id_or_slug) | (Shop.username == shop_id_or_slug)
+        business = db.query(Business).filter(
+            (Business.slug == business_id_or_slug) | (Business.username == business_id_or_slug)
         ).first()
     
-    if not shop:
+    if not business:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shop not found"
+            detail="Business not found"
         )
     
-    return shop
+    return business
 
-# Update any public routes that use shop_id to also support slugs
-@router.get("/salons/{shop_id_or_slug}", response_model=ShopDetailedResponse)
+# Update any public routes that use business_id to also support slugs
+@router.get("/salons/{business_id_or_slug}", response_model=BusinessDetailedResponse)
 async def get_salon_details(
-    shop_id_or_slug: str,
+    business_id_or_slug: str,
     db: Session = Depends(get_db)
 ):
     """Get detailed salon information by ID or slug."""
-    shop = await get_public_shop_by_id_or_slug(shop_id_or_slug, db)
+    business = await get_public_business_by_id_or_slug(business_id_or_slug, db)
     
-    # Continue with existing code using shop.id instead of shop_id
+    # Continue with existing code using business.id instead of business_id
     # ...
     
-@router.get("/salons/{shop_id_or_slug}/queue", response_model=SimplifiedQueueResponse)
-async def get_simplified_queue(shop_id_or_slug: str, db: Session = Depends(get_db)):
+@router.get("/salons/{business_id_or_slug}/queue", response_model=SimplifiedQueueResponse)
+async def get_simplified_queue(business_id_or_slug: str, db: Session = Depends(get_db)):
     """Get a simplified view of the queue for a salon by ID or slug."""
-    shop = await get_public_shop_by_id_or_slug(shop_id_or_slug, db)
+    business = await get_public_business_by_id_or_slug(business_id_or_slug, db)
     
-    # Continue with existing code using shop.id
+    # Continue with existing code using business.id
     # ...
     
-@router.post("/salons/{shop_id_or_slug}/check-in", response_model=QueueEntryPublicResponse)
+@router.post("/salons/{business_id_or_slug}/check-in", response_model=QueueEntryPublicResponse)
 async def check_in_to_salon(
-    shop_id_or_slug: str,
+    business_id_or_slug: str,
     queue_entry: QueueEntryCreatePublic,
     db: Session = Depends(get_db)
 ):
     """Check in to a salon queue by salon ID or slug."""
-    shop = await get_public_shop_by_id_or_slug(shop_id_or_slug, db)
+    business = await get_public_business_by_id_or_slug(business_id_or_slug, db)
     
-    # Update shop_id with the actual shop ID from the lookup
-    queue_entry.shop_id = shop.id
+    # Update business_id with the actual business ID from the lookup
+    queue_entry.business_id = business.id
     
     # Continue with existing code
-    # ... 
+    # ...

@@ -24,6 +24,16 @@ def get_barber_profile(
     barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
+    
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
 
     # Get shop information
     shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
@@ -103,8 +113,13 @@ def create_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
     # Check for schedule conflicts
-    if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date):
+    if check_schedule_conflicts(db, barber.id, schedule_in.start_date, schedule_in.end_date, shop.timezone):
         raise HTTPException(
             status_code=400,
             detail="Schedule conflict: Another schedule exists for this time period"
@@ -134,6 +149,11 @@ def get_my_schedules(
     barber = db.query(models.Barber).filter(models.Barber.user_id == current_user.id).first()
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
+
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
 
     # Get base schedules
     query = db.query(models.BarberSchedule).filter(
@@ -171,7 +191,7 @@ def get_my_schedules(
     # Process recurring schedules
     recurring_instances = []
     for schedule in schedules:
-        instances = get_recurring_instances(schedule, start_date, end_date)
+        instances = get_recurring_instances(schedule, start_date, end_date, shop.timezone)
         for instance in instances:
             recurring_schedule = models.BarberSchedule(
                 id=schedule.id,
@@ -197,6 +217,11 @@ def update_schedule(
     if not barber:
         raise HTTPException(status_code=404, detail="Barber profile not found")
 
+    # Get shop for timezone
+    shop = db.query(models.Shop).filter(models.Shop.id == barber.shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
     schedule = db.query(models.BarberSchedule).filter(
         models.BarberSchedule.id == schedule_id,
         models.BarberSchedule.barber_id == barber.id
@@ -209,7 +234,7 @@ def update_schedule(
         new_start = schedule_update.start_date or schedule.start_date
         new_end = schedule_update.end_date or schedule.end_date
         
-        if check_schedule_conflicts(db, barber.id, new_start, new_end, exclude_schedule_id=schedule.id):
+        if check_schedule_conflicts(db, barber.id, new_start, new_end, shop.timezone, exclude_schedule_id=schedule.id):
             raise HTTPException(
                 status_code=400,
                 detail="Schedule conflict: Another schedule exists for this time period"
@@ -347,3 +372,4 @@ def get_barber_metrics(
         "avg_service_duration_minutes": avg_service_duration_minutes,
         "daily_data": daily_data
     }
+

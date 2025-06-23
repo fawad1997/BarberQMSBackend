@@ -20,8 +20,8 @@ def request_verification_code(phone_number: str):
     # Store it in a dictionary with the phone number as the key
     verification_codes[phone_number] = code
     # Send the code via SMS (integration with SMS gateway required)
-    # For demonstration, we'll just print it
-    print(f"Verification code for {phone_number}: {code}")
+    # TODO: Integrate with SMS gateway for production
+    # For demonstration purposes, code is stored in memory
     return {"message": "Verification code sent"}
 
 @router.post("/verify-code")
