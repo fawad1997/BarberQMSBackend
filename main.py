@@ -47,6 +47,8 @@ origins = [
     "http://localhost:3000",  # Add Next.js development server
     "https://walkinonline.com",
     "https://www.walkinonline.com",
+    "https://walk-inonline.com",      # Add deployed domain with hyphens
+    "https://www.walk-inonline.com",  # Add www version with hyphens
     "https://walkinonline.app",
     "https://www.walkinonline.app",
     "http://127.0.0.1:8080",
