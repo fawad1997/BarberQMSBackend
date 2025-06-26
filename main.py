@@ -52,8 +52,7 @@ origins = [
     "https://walkinonline.app",
     "https://www.walkinonline.app",
     "http://127.0.0.1:8080",
-    "http://127.0.0.1:3000",
-    "*"
+    "http://127.0.0.1:3000"
 ]
 
 # Update the CORS middleware configuration
@@ -123,6 +122,7 @@ app.include_router(public.router)
 app.include_router(websocket_router)  # Include WebSocket router
 
 @app.get("/")
+@app.head("/")
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
 
