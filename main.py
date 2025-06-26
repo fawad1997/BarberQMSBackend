@@ -45,13 +45,11 @@ load_dotenv()
 origins = [
     "http://localhost:8080",
     "http://localhost:8000",
-    "http://localhost:3000",  # Add Next.js development server
-    "https://walkinonline.com",
-    "https://www.walkinonline.com",
-    "https://walk-inonline.com",      # Add deployed domain with hyphens
-    "https://www.walk-inonline.com",  # Add www version with hyphens
-    "https://walkinonline.app",
-    "https://www.walkinonline.app",
+    "http://localhost:3000",  # Next.js development server
+    "https://walkinonline.com",      # Primary production domain
+    "https://www.walkinonline.com",  # WWW version
+    "https://walkinonline.app",      # Alternative domain
+    "https://www.walkinonline.app",  # WWW version of alternative
     "http://127.0.0.1:8080",
     "http://127.0.0.1:3000"
 ]
@@ -66,28 +64,8 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# Add middleware to handle WebSocket CORS
-@app.middleware("http")
-async def process_ws_cors(request: Request, call_next):
-    """Middleware to handle WebSocket CORS headers"""
-    # Check if it's a WebSocket upgrade request
-    if request.headers.get("upgrade", "").lower() == "websocket":
-        logger.debug(f"WebSocket upgrade request to: {request.url.path}")
-        
-        # Process the request
-        response = await call_next(request)
-        
-        # Set required CORS headers for WebSockets
-        origin = request.headers.get("origin")
-        if origin and origin in origins:
-            # If the origin is in our allowed list, echo it back
-            response.headers["Access-Control-Allow-Origin"] = origin
-            # Allow credentials (important for authenticated WebSockets)
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            
-        return response
-        
-    return await call_next(request)
+# WebSocket CORS is now handled by the main CORSMiddleware above
+# Removed custom middleware to prevent duplicate headers
 
 # Start the queue refresh background task
 @app.on_event("startup")
