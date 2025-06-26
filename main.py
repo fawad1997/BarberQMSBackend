@@ -53,7 +53,6 @@ origins = [
     "https://www.walkinonline.app",
     "http://127.0.0.1:8080",
     "http://127.0.0.1:3000",
-    "*"
 ]
 
 # Update the CORS middleware configuration
@@ -66,10 +65,10 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
-# Add middleware to handle WebSocket CORS
+# Add middleware to handle WebSocket CORS (only if CORSMiddleware doesn't handle it)
 @app.middleware("http")
 async def process_ws_cors(request: Request, call_next):
-    """Middleware to handle WebSocket CORS headers"""
+    """Middleware to handle WebSocket CORS headers - only adds headers if they're missing"""
     # Check if it's a WebSocket upgrade request
     if request.headers.get("upgrade", "").lower() == "websocket":
         logger.debug(f"WebSocket upgrade request to: {request.url.path}")
@@ -77,16 +76,18 @@ async def process_ws_cors(request: Request, call_next):
         # Process the request
         response = await call_next(request)
         
-        # Set required CORS headers for WebSockets
-        if "*" in origins:
-            # If wildcard is allowed, use the Origin header or fall back to *
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
-        elif request.headers.get("origin") in origins:
-            # If the origin is in our allowed list, echo it back
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin")
-            
+        # Only set CORS headers if they're not already set by CORSMiddleware
+        if "Access-Control-Allow-Origin" not in response.headers:
+            origin = request.headers.get("origin")
+            if origin and origin in origins:
+                response.headers["Access-Control-Allow-Origin"] = origin
+            elif "http://localhost" in str(origin) or "http://127.0.0.1" in str(origin):
+                # Allow localhost/127.0.0.1 for development
+                response.headers["Access-Control-Allow-Origin"] = origin
+                
         # Allow credentials (important for authenticated WebSockets)
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        if "Access-Control-Allow-Credentials" not in response.headers:
+            response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
         
     return await call_next(request)
