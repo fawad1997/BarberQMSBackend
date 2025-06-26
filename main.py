@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import asyncio
+from datetime import datetime
 from fastapi.responses import FileResponse
 from app import models
 
@@ -77,15 +78,13 @@ async def process_ws_cors(request: Request, call_next):
         response = await call_next(request)
         
         # Set required CORS headers for WebSockets
-        if "*" in origins:
-            # If wildcard is allowed, use the Origin header or fall back to *
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
-        elif request.headers.get("origin") in origins:
+        origin = request.headers.get("origin")
+        if origin and origin in origins:
             # If the origin is in our allowed list, echo it back
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin")
+            response.headers["Access-Control-Allow-Origin"] = origin
+            # Allow credentials (important for authenticated WebSockets)
+            response.headers["Access-Control-Allow-Credentials"] = "true"
             
-        # Allow credentials (important for authenticated WebSockets)
-        response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
         
     return await call_next(request)
@@ -125,6 +124,44 @@ app.include_router(websocket_router)  # Include WebSocket router
 @app.head("/")
 def read_root():
     return {"message": "Welcome to the Barbershop Queue System API"}
+
+@app.get("/ping")
+@app.head("/ping")
+def ping():
+    return {"status": "ok", "message": "Service is healthy"}
+
+@app.get("/health")
+def health_check():
+    """Comprehensive health check endpoint"""
+    try:
+        # Test database connection
+        from app.database import SessionLocal
+        db = SessionLocal()
+        db.execute("SELECT 1")
+        db.close()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return {
+        "status": "ok",
+        "message": "Backend service is running",
+        "database": db_status,
+        "environment": os.getenv("ENVIRONMENT", "unknown"),
+        "cors_origins": origins,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/debug/cors")
+def debug_cors(request: Request):
+    """Debug CORS configuration"""
+    origin = request.headers.get("origin")
+    return {
+        "request_origin": origin,
+        "allowed_origins": origins,
+        "origin_allowed": origin in origins if origin else False,
+        "headers": dict(request.headers)
+    }
 
 @app.get("/favicon.ico")
 async def favicon():
