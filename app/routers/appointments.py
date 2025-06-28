@@ -15,7 +15,7 @@ from app.models import EmployeeStatus, AppointmentStatus, QueueStatus
 from app.models import UserRole
 from app.websockets.utils import broadcast_queue_update
 from app.websockets.manager import manager
-from app.utils.schedule_utils import is_employee_working, check_schedule_conflicts, ensure_timezone_aware
+from app.utils.schedule_utils import is_employee_working, check_schedule_conflicts, ensure_timezone_aware, ensure_employee_has_schedules
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -152,13 +152,16 @@ async def create_appointment(
             raise HTTPException(status_code=404, detail="No employees found for this business. Please contact the business owner to add employees.")
               
         for employee in employees:
+            # Ensure employee has schedules (create default ones if missing)
+            ensure_employee_has_schedules(db, employee.id, employee.business_id)
+            
             # Check if employee has any schedule that covers the appointment time
             employee_schedules = db.query(models.EmployeeSchedule).filter(
                 models.EmployeeSchedule.employee_id == employee.id
             ).all()
             
             if not employee_schedules:
-                continue  # Skip employees with no schedules instead of raising an error
+                continue  # Skip employees with no schedules (shouldn't happen after ensure_employee_has_schedules)
                 
             is_scheduled = False
             for schedule in employee_schedules:
@@ -187,23 +190,7 @@ async def create_appointment(
                     available_employees.append(employee)
         
         if not available_employees:
-            # Check if any employees have schedules but are all booked
-            any_employee_has_schedule = False
-            for employee in employees:
-                schedules_count = db.query(models.EmployeeSchedule).filter(
-                    models.EmployeeSchedule.employee_id == employee.id
-                ).count()
-                if schedules_count > 0:
-                    any_employee_has_schedule = True
-                    break
-                    
-            if any_employee_has_schedule:
-                raise HTTPException(status_code=400, detail="No employees available at the requested time. Please try a different time or date.")
-            else:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="No employee schedules have been set up for this business. Please contact the business owner to set up employee working hours."
-                )
+            raise HTTPException(status_code=400, detail="No employees available at the requested time. Please try a different time or date.")
         
         # Select the employee with the fewest appointments on that day
         selected_employee = min(

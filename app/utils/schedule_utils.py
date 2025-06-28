@@ -1,6 +1,6 @@
 from datetime import datetime, time, timedelta
 from typing import List, Tuple, Optional
-from app.models import EmployeeSchedule, ScheduleRepeatFrequency, ScheduleOverride
+from app.models import EmployeeSchedule, ScheduleRepeatFrequency, ScheduleOverride, BusinessOperatingHours, Employee
 import pytz
 
 UTC = pytz.UTC
@@ -42,17 +42,52 @@ def is_employee_working(
     
     if not schedule:
         return False
+
+def create_default_employee_schedules(db, employee_id: int, business_id: int):
+    """
+    Create default employee schedules based on business operating hours.
+    This function creates schedules for all days where the business is open.
+    """
+    # Get business operating hours
+    business_hours = db.query(BusinessOperatingHours).filter(
+        BusinessOperatingHours.business_id == business_id
+    ).all()
     
-    target_time = target_datetime.time()
+    # Create employee schedules for each business operating day
+    for business_hour in business_hours:
+        if not business_hour.is_closed and business_hour.opening_time and business_hour.closing_time:
+            # Check if schedule already exists for this day
+            existing_schedule = db.query(EmployeeSchedule).filter(
+                EmployeeSchedule.employee_id == employee_id,
+                EmployeeSchedule.day_of_week == business_hour.day_of_week
+            ).first()
+            
+            if not existing_schedule:
+                # Create new schedule matching business hours
+                new_schedule = EmployeeSchedule(
+                    employee_id=employee_id,
+                    day_of_week=business_hour.day_of_week,
+                    start_time=business_hour.opening_time,
+                    end_time=business_hour.closing_time,
+                    lunch_break_start=business_hour.lunch_break_start,
+                    lunch_break_end=business_hour.lunch_break_end,
+                    is_working=True
+                )
+                db.add(new_schedule)
     
-    # Check if within working hours
-    if schedule.start_time and schedule.end_time:
-        if schedule.end_time < schedule.start_time:  # Overnight shift
-            return target_time >= schedule.start_time or target_time <= schedule.end_time
-        else:
-            return schedule.start_time <= target_time <= schedule.end_time
+    db.commit()
+
+def ensure_employee_has_schedules(db, employee_id: int, business_id: int):
+    """
+    Ensure an employee has schedules. If not, create default ones based on business hours.
+    """
+    # Check if employee has any schedules
+    existing_schedules = db.query(EmployeeSchedule).filter(
+        EmployeeSchedule.employee_id == employee_id
+    ).count()
     
-    return False
+    if existing_schedules == 0:
+        create_default_employee_schedules(db, employee_id, business_id)
 
 def is_employee_on_lunch_break(
     db,
