@@ -160,31 +160,6 @@ class ShopBase(BaseModel):
 class ShopCreate(ShopBase):
     pass
 
-class ShopUpdate(BaseModel):
-    name: Optional[str] = None
-    address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip_code: Optional[str] = None
-    phone_number: Optional[str] = None
-    email: Optional[EmailStr] = None
-    average_wait_time: Optional[int] = None
-
-class ShopResponse(ShopBase):
-    id: int
-    owner_id: int
-    slug: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    @field_validator('created_at', 'updated_at')
-    def validate_dates(cls, v):
-        if v is not None:
-            return validate_timezone(v)
-        return v
-
-    model_config = ConfigDict(from_attributes=True)
-
 # Shop Operating Hours schemas
 class ShopOperatingHoursBase(BaseModel):
     day_of_week: int  # 0=Sunday, 1=Monday, ..., 6=Saturday
@@ -206,6 +181,33 @@ class ShopOperatingHoursResponse(ShopOperatingHoursBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ShopUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[EmailStr] = None
+    average_wait_time: Optional[int] = None
+    operating_hours: Optional[List[ShopOperatingHoursCreate]] = None
+
+class ShopResponse(ShopBase):
+    id: int
+    owner_id: int
+    slug: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_validator('created_at', 'updated_at')
+    def validate_dates(cls, v):
+        if v is not None:
+            return validate_timezone(v)
+        return v
+
+    model_config = ConfigDict(from_attributes=True)
+
+# Shop Operating Hours schemas
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -409,6 +411,7 @@ class BusinessUpdate(BaseModel):
     username: Optional[str] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
+    operating_hours: Optional[List[BusinessOperatingHoursCreate]] = None
 
     @field_validator('username')
     def validate_username_field(cls, v):

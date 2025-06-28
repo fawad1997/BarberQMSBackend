@@ -334,11 +334,26 @@ def update_shop(
         
         shop.slug = new_slug
 
-    # Update other fields
-    update_data = shop_in.model_dump(exclude_unset=True, exclude={"slug", "username"})
+    # Update other fields (excluding operating_hours which we'll handle separately)
+    update_data = shop_in.model_dump(exclude_unset=True, exclude={"slug", "username", "operating_hours"})
     
     for key, value in update_data.items():
         setattr(shop, key, value)
+    
+    # Handle operating hours update if provided
+    if shop_in.operating_hours is not None:
+        # Delete existing operating hours for this shop
+        db.query(models.ShopOperatingHours).filter(
+            models.ShopOperatingHours.shop_id == shop.id
+        ).delete()
+        
+        # Create new operating hours
+        for hours_data in shop_in.operating_hours:
+            operating_hours = models.ShopOperatingHours(
+                shop_id=shop.id,
+                **hours_data.model_dump()
+            )
+            db.add(operating_hours)
     
     db.commit()
     db.refresh(shop)
